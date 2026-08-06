@@ -122,6 +122,29 @@ or build a local binary from a checkout:
 go build -trimpath -o ./dist/caxxxd ./cmd/caxxxd
 ```
 
+## update
+
+### Homebrew
+
+```bash
+brew update
+brew upgrade caxxxd
+```
+
+### From source
+
+```bash
+go install github.com/ballisarium/caxxxd/cmd/caxxxd@latest
+```
+
+check the installed version with:
+
+```bash
+caxxxd --version
+```
+
+`caxxxd update` is not a supported command.
+
 ## usage
 
 ```bash
