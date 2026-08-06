@@ -87,6 +87,10 @@ type App struct {
 	url  string
 	info ytdlp.MediaInfo
 
+	sectionFixed bool
+	rangeReturn  stage
+	rangeRetry   bool
+
 	mode        domain.MediaMode
 	maxHeight   int
 	container   domain.VideoContainer
@@ -140,14 +144,16 @@ func New(options Options) *App {
 	preferences := config.Default()
 
 	return &App{
-		options:     options,
-		console:     options.Console,
-		prompt:      options.Prompter,
-		preferences: preferences,
-		outputDir:   preferences.OutputDir,
-		container:   preferences.VideoContainer,
-		audioFormat: preferences.AudioFormat,
-		initialURL:  strings.TrimSpace(options.InitialURL),
+		options:      options,
+		console:      options.Console,
+		prompt:       options.Prompter,
+		preferences:  preferences,
+		outputDir:    preferences.OutputDir,
+		container:    preferences.VideoContainer,
+		audioFormat:  preferences.AudioFormat,
+		initialURL:   strings.TrimSpace(options.InitialURL),
+		sectionFixed: options.Section != nil,
+		rangeReturn:  stageMode,
 	}
 }
 
@@ -419,6 +425,9 @@ func (a *App) resetForNextDownload() {
 	a.info = ytdlp.MediaInfo{}
 	a.url = ""
 	a.initialURL = ""
+	if !a.sectionFixed {
+		a.options.Section = nil
+	}
 	a.mode = ""
 	a.maxHeight = 0
 	a.logs = nil

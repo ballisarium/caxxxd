@@ -208,6 +208,9 @@ type scriptPrompter struct {
 	t       *testing.T
 	answers []answer
 	index   int
+	// Existing tests focus on later decisions. They keep the new default
+	// behaviour by accepting the whole-video range unless a range test opts in.
+	autoWholeVideo bool
 
 	questions []string
 	menus     []menu
@@ -221,7 +224,7 @@ type menu struct {
 }
 
 func script(answers ...answer) *scriptPrompter {
-	return &scriptPrompter{answers: answers}
+	return &scriptPrompter{answers: answers, autoWholeVideo: true}
 }
 
 func (s *scriptPrompter) next(kind answerKind, question string) (answer, bool) {
@@ -263,6 +266,13 @@ func (s *scriptPrompter) Choose(question string, choices []app.Choice, _ int) (i
 		labels = append(labels, choice.Label)
 	}
 	s.menus = append(s.menus, menu{question: question, labels: labels})
+	if strings.HasPrefix(question, "Time range") && s.autoWholeVideo {
+		for index, choice := range choices {
+			if choice.Label == "Whole video" {
+				return index, nil
+			}
+		}
+	}
 
 	reply, ok := s.next(answerChoice, question)
 	if !ok {
@@ -426,6 +436,16 @@ func (s *session) requireAsked(prefix string) {
 		}
 	}
 	s.t.Fatalf("expected the flow to ask %q, it asked:\n%s", prefix, strings.Join(s.prompter.questions, "\n"))
+}
+
+// requireNotAsked fails if the flow asks a question starting with prefix.
+func (s *session) requireNotAsked(prefix string) {
+	s.t.Helper()
+	for _, question := range s.prompter.questions {
+		if strings.HasPrefix(question, prefix) {
+			s.t.Fatalf("did not expect the flow to ask %q, it asked:\n%s", prefix, strings.Join(s.prompter.questions, "\n"))
+		}
+	}
 }
 
 // requireNotDrawn fails if a fragment appears on screen.

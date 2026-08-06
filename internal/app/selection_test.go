@@ -332,14 +332,16 @@ func TestAVideoOnlyStreamIsRefusedWhenThereIsNoSoundToPairIt(t *testing.T) {
 
 func TestBackTransitions(t *testing.T) {
 	tests := []struct {
-		name   string
-		script []answer
-		want   string
+		name      string
+		script    []answer
+		want      string
+		skipRange bool
 	}{
 		{
-			name:   "the media choice returns to the link",
-			script: []answer{text(link), pick("‹ Back")},
-			want:   "Paste a media URL",
+			name:      "the media choice returns to the link",
+			script:    []answer{text(link), pick("Whole video"), pick("‹ Back"), pick("‹ Back")},
+			want:      "Paste a media URL",
+			skipRange: true,
 		},
 		{
 			name:   "video quality returns to the media choice",
@@ -381,7 +383,9 @@ func TestBackTransitions(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			session := newSession(t, script(test.script...)).run()
+			session := newSession(t, script(test.script...))
+			session.prompter.autoWholeVideo = !test.skipRange
+			session.run()
 			session.requireScripted()
 
 			asked := session.prompter.questions

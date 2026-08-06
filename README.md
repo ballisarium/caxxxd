@@ -85,6 +85,9 @@ application support directory.
   * [yt-dlp](https://github.com/yt-dlp/yt-dlp)
   * [ffmpeg](https://ffmpeg.org)
 
+`ffprobe`, which is shipped with ffmpeg, is used to inspect the first packet
+when a clipped download needs local timestamp normalization.
+
 `caxxxd` does not bundle or install the external tools itself. it checks for
 them on startup and tells you what is missing.
 
@@ -168,18 +171,44 @@ minutes, and seconds (`01:05:30`). the start must be before the end, and the
 end must fit inside the duration reported by `yt-dlp`; invalid ranges stop
 before the download starts.
 
+you can also choose the range inside the interactive flow. after caxxxd reads
+the media details, choose `Whole video` to keep the complete item or
+`Choose a range` to enter `START-END` in one prompt. the prompt shows the
+video duration, explains the accepted formats, and stays on the same input
+after an invalid value so a typo does not restart the flow. at the final
+review, `Change time range` opens the same editor again without making you
+repeat the video and format choices.
+
+for example, an interactive clipped download looks like this:
+
+```text
+Time range
+  Whole video       download all 2:05
+▸ Choose a range    download only part of this video
+  ‹ Back            return to the URL
+
+Time range: 00:30-01:20
+Use SS, MM:SS, or HH:MM:SS. Video duration: 2:05.
+```
+
 the range is passed to `yt-dlp` as `--download-sections`, so the source is
 sought directly whenever the selected format allows it. after yt-dlp has
-merged the short result, caxxxd runs one local timestamp-normalization pass:
-`ffmpeg -ss START -t LENGTH -c copy`. the result replaces the downloaded file
-atomically, which keeps independently fetched video and audio streams on one
-clean timeline.
+merged the short result, caxxxd reads the first local media packet and runs
+one timestamp-normalization pass with `ffmpeg -ss LOCAL_START -t LENGTH
+-c copy`. this accounts for keyframe padding and independent video/audio
+timestamps without seeking past the already-short file. the result replaces
+the downloaded file atomically, which keeps independently fetched video and
+audio streams on one clean timeline.
 
 caxxxd does not force keyframes or do a full re-encode. stream copy keeps
 clipping fast and leaves the original codecs untouched. as a result, the
 actual first and last frame can be close to the requested timestamps rather
 than frame-perfect. clipped files include the range in their filename so they
 do not collide with a full download of the same item.
+
+for audio-only clips, the audio and metadata stay stream-copied. an embedded
+thumbnail is omitted when the target audio container cannot carry it as a
+copied stream.
 
 downloads go to `~/Downloads/caxxxd` by default. the review step lets you
 change the folder, and the choice is remembered in:

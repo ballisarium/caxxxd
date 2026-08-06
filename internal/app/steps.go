@@ -19,6 +19,7 @@ type stage int
 
 const (
 	stageLink stage = iota
+	stageRange
 	stageMode
 	stageVideoQuality
 	stageVideoContainer
@@ -38,7 +39,7 @@ func stepOf(current stage) (int, string) {
 	switch current {
 	case stageLink:
 		return 1, stepTitles[0]
-	case stageMode:
+	case stageRange, stageMode:
 		return 2, stepTitles[1]
 	case stageReview:
 		return 4, stepTitles[3]
@@ -77,7 +78,7 @@ func (a *App) screen(current stage) {
 // is where a new item is chosen.
 func showsMedia(current stage) bool {
 	switch current {
-	case stageMode, stageVideoQuality, stageVideoContainer,
+	case stageRange, stageMode, stageVideoQuality, stageVideoContainer,
 		stageAudioFormat, stageManualVideo, stageManualAudio:
 		return true
 	default:
@@ -92,6 +93,8 @@ func (a *App) step(ctx context.Context, current stage) (stage, error) {
 	switch current {
 	case stageLink:
 		return a.askLink(ctx)
+	case stageRange:
+		return a.askRange()
 	case stageMode:
 		return a.askMode()
 	case stageVideoQuality:
@@ -141,6 +144,9 @@ func (a *App) askLink(ctx context.Context) (stage, error) {
 	}
 
 	a.url = value
+	if !a.sectionFixed {
+		a.options.Section = nil
+	}
 	return a.fetchMetadata(ctx)
 }
 
@@ -181,6 +187,9 @@ func (a *App) fetchMetadata(ctx context.Context) (stage, error) {
 	spinner.Done("Found " + ui.Truncate(info.Title, a.console.Width()/2))
 	a.info = info
 	a.clearManualSelection()
+	if !a.sectionFixed {
+		return stageRange, nil
+	}
 	return stageMode, nil
 }
 
@@ -240,8 +249,94 @@ func (a *App) askMode() (stage, error) {
 		a.clearManualSelection()
 		return stageAudioFormat, nil
 	default:
-		return stageLink, nil
+		return stageRange, nil
 	}
+}
+
+// askRange decides whether this item should be downloaded whole or clipped.
+// CLI-provided ranges never enter this stage: they are an explicit choice that
+// has already been parsed before the interface starts.
+func (a *App) askRange() (stage, error) {
+	if a.rangeRetry {
+		a.rangeRetry = false
+		return a.askRangeInput()
+	}
+
+	duration := ui.FormatDuration(a.info.Duration)
+	choices := []Choice{
+		{Label: "Whole video", Detail: "download all " + duration},
+		{Label: "Choose a range", Detail: "download only part of this video"},
+		backChoice,
+	}
+
+	picked, err := a.prompt.Choose("Time range", choices, 0)
+	if err != nil {
+		return stageRange, err
+	}
+
+	switch picked {
+	case 0:
+		a.options.Section = nil
+		return a.finishRange(), nil
+	case 1:
+		return a.askRangeInput()
+	default:
+		return a.backFromRange(), nil
+	}
+}
+
+func (a *App) askRangeInput() (stage, error) {
+	duration := ui.FormatDuration(a.info.Duration)
+	initial := ""
+	if a.options.Section != nil {
+		initial = a.options.Section.String()
+	}
+	typed, err := a.prompt.Text(
+		"Time range",
+		"Use SS, MM:SS, or HH:MM:SS. Video duration: "+duration+".",
+		initial,
+	)
+	if err != nil {
+		return stageRange, err
+	}
+
+	section, parseErr := domain.ParseTimeRange(strings.TrimSpace(typed))
+	if parseErr != nil {
+		return a.rangeError(parseErr), nil
+	}
+	if durationErr := section.ValidateDuration(a.info.Duration); durationErr != nil {
+		return a.rangeError(durationErr), nil
+	}
+
+	a.options.Section = &section
+	return a.finishRange(), nil
+}
+
+func (a *App) rangeError(err error) stage {
+	a.rangeRetry = true
+	a.carry(
+		"That time range is not valid",
+		err.Error(),
+		"Use START-END, for example 00:30-01:20.",
+	)
+	return stageRange
+}
+
+func (a *App) finishRange() stage {
+	a.rangeRetry = false
+	next := a.rangeReturn
+	a.rangeReturn = stageMode
+	return next
+}
+
+func (a *App) backFromRange() stage {
+	a.rangeRetry = false
+	next := a.rangeReturn
+	a.rangeReturn = stageMode
+	if next == stageReview {
+		return stageReview
+	}
+	return stageLink
 }
 
 // askVideoQuality offers the presets, plus the exact stream table.
@@ -512,12 +607,21 @@ func (a *App) audioStreams() []ytdlp.Format {
 func (a *App) askReview() (stage, error) {
 	a.console.Panel("Ready to download", a.console.Fields(a.reviewFields())...)
 
-	picked, err := a.prompt.Choose("Start?", []Choice{
+	choices := []Choice{
 		{Label: "Download", Detail: "run yt-dlp with exactly this"},
 		{Label: "Change download folder", Detail: collapseHome(a.outputDir, a.options.Home)},
-		backChoice,
-		quitChoice,
-	}, 0)
+	}
+	changeRange := -1
+	if !a.sectionFixed {
+		changeRange = len(choices)
+		choices = append(choices, Choice{Label: "Change time range", Detail: "choose a different part of the video"})
+	}
+	backIndex := len(choices)
+	choices = append(choices, backChoice)
+	quitIndex := len(choices)
+	choices = append(choices, quitChoice)
+
+	picked, err := a.prompt.Choose("Start?", choices, 0)
 	if err != nil {
 		return stageReview, err
 	}
@@ -530,8 +634,13 @@ func (a *App) askReview() (stage, error) {
 			return stageReview, err
 		}
 		return stageReview, nil
-	case 2:
+	case changeRange:
+		a.rangeReturn = stageReview
+		return stageRange, nil
+	case backIndex:
 		return a.reviewReturn(), nil
+	case quitIndex:
+		return stageReview, errQuit
 	default:
 		return stageReview, errQuit
 	}
@@ -541,7 +650,7 @@ func (a *App) askReview() (stage, error) {
 func (a *App) reviewFields() []ui.Field {
 	fields := []ui.Field{{Label: "Title", Value: ui.Truncate(a.info.Title, a.console.Width()-20)}}
 	if a.options.Section != nil {
-		fields = append(fields, ui.Field{Label: "Section", Value: a.options.Section.String()})
+		fields = append(fields, ui.Field{Label: "Time range", Value: a.options.Section.String()})
 	}
 
 	if a.mode == domain.MediaModeVideo {

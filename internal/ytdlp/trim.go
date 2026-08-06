@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/ballisarium/caxxxd/internal/domain"
@@ -22,6 +23,7 @@ const trimWaitGrace = 5 * time.Second
 // copy keeps the audio and video codecs untouched.
 type Trimmer struct {
 	Binary string
+	Probe  string
 }
 
 // Trim seeks the downloaded section again as one local input and atomically
@@ -43,6 +45,15 @@ func (t Trimmer) Trim(ctx context.Context, path string, section domain.TimeRange
 		return errors.New("ffmpeg could not finalize clipped file: output path is a directory")
 	}
 
+	seek, err := t.inputSeek(ctx, path)
+	if err != nil {
+		return fmt.Errorf("ffprobe could not inspect clipped file: %w", err)
+	}
+	mapArgs, err := t.mapStreams(ctx, path)
+	if err != nil {
+		return fmt.Errorf("ffprobe could not inspect clipped streams: %w", err)
+	}
+
 	temporary, err := temporaryTrimFile(path)
 	if err != nil {
 		return fmt.Errorf("ffmpeg could not create a temporary clip: %w", err)
@@ -59,14 +70,12 @@ func (t Trimmer) Trim(ctx context.Context, path string, section domain.TimeRange
 		"-y",
 		"-hide_banner",
 		"-loglevel", "error",
-		"-ss", strconv.FormatInt(section.Start, 10),
+		"-ss", strconv.FormatFloat(seek, 'f', -6, 64),
 		"-i", path,
 		"-t", strconv.FormatInt(length, 10),
-		"-map", "0",
-		"-c", "copy",
-		"-avoid_negative_ts", "make_zero",
-		temporaryPath,
 	}
+	args = append(args, mapArgs...)
+	args = append(args, "-c", "copy", "-avoid_negative_ts", "make_zero", temporaryPath)
 
 	output, err := runFFmpeg(ctx, t.Binary, args)
 	if err != nil {
@@ -86,6 +95,95 @@ func (t Trimmer) Trim(ctx context.Context, path string, section domain.TimeRange
 		return fmt.Errorf("ffmpeg could not replace clipped file: %w", err)
 	}
 	return nil
+}
+
+// inputSeek is the timestamp of the first packet in the already-sectioned
+// file. yt-dlp may seek a remote stream to a keyframe and leave that stream's
+// first packet several seconds after the container's zero. Seeking by the
+// user's original timestamp again would then cut past the file, producing a
+// tiny or empty result.
+func (t Trimmer) inputSeek(ctx context.Context, path string) (float64, error) {
+	var lastErr error
+	for _, stream := range []string{"v:0", "a:0"} {
+		start, err := t.streamStart(ctx, stream, path)
+		if err == nil {
+			if start < 0 {
+				return 0, nil
+			}
+			return start, nil
+		}
+		lastErr = err
+	}
+	if lastErr == nil {
+		lastErr = errors.New("no media stream was found")
+	}
+	return 0, lastErr
+}
+
+func (t Trimmer) streamStart(ctx context.Context, stream, path string) (float64, error) {
+	args := []string{
+		"-v", "error",
+		"-select_streams", stream,
+		"-read_intervals", "%+#1",
+		"-show_entries", "packet=pts_time",
+		"-of", "default=noprint_wrappers=1:nokey=1",
+		path,
+	}
+	output, err := runFFProbe(ctx, t.probeBinary(), args)
+	if err != nil {
+		return 0, err
+	}
+	value := strings.TrimSpace(string(output))
+	if value == "" || value == "N/A" {
+		return 0, errors.New("media stream has no start time")
+	}
+	start, err := strconv.ParseFloat(value, 64)
+	if err != nil {
+		return 0, fmt.Errorf("invalid media start time %q: %w", value, err)
+	}
+	return start, nil
+}
+
+// mapStreams drops an attached thumbnail from audio-only outputs. A picture
+// is exposed as a video stream by ffprobe, but containers such as Ogg Opus do
+// not accept that JPEG as a regular copied video stream.
+func (t Trimmer) mapStreams(ctx context.Context, path string) ([]string, error) {
+	args := []string{
+		"-v", "error",
+		"-show_entries", "stream=codec_type:stream_disposition=attached_pic",
+		"-of", "csv=p=0",
+		path,
+	}
+	output, err := runFFProbe(ctx, t.probeBinary(), args)
+	if err != nil {
+		return nil, err
+	}
+
+	seenStream := false
+	for _, line := range strings.Split(strings.TrimSpace(string(output)), "\n") {
+		fields := strings.Split(strings.TrimSpace(line), ",")
+		if len(fields) < 2 {
+			continue
+		}
+		seenStream = true
+		if fields[0] == "video" && fields[1] == "0" {
+			return []string{"-map", "0"}, nil
+		}
+	}
+	if seenStream {
+		return []string{"-map", "0:a:0"}, nil
+	}
+	return []string{"-map", "0"}, nil
+}
+
+func (t Trimmer) probeBinary() string {
+	if t.Probe != "" {
+		return t.Probe
+	}
+	if filepath.Base(t.Binary) == "ffmpeg" && filepath.Dir(t.Binary) != "." {
+		return filepath.Join(filepath.Dir(t.Binary), "ffprobe")
+	}
+	return "ffprobe"
 }
 
 func temporaryTrimFile(path string) (*os.File, error) {
@@ -127,4 +225,10 @@ func runFFmpeg(ctx context.Context, binary string, args []string) ([]byte, error
 	err := cmd.Run()
 	close(finished)
 	return output.Bytes(), err
+}
+
+func runFFProbe(ctx context.Context, binary string, args []string) ([]byte, error) {
+	cmd := exec.CommandContext(ctx, binary, args...)
+	process.ConfigureGroup(cmd)
+	return cmd.Output()
 }

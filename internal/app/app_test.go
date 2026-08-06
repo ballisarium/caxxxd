@@ -106,9 +106,17 @@ func TestInitialURLIsOfferedAsThePrefilledAnswer(t *testing.T) {
 func TestGoingBackToTheLinkOffersTheOneAlreadyLoaded(t *testing.T) {
 	const link = "https://www.youtube.com/watch?v=abc123"
 
-	session := newSession(t, script(text(""), pick("‹ Back"), text("")), func(options *app.Options) {
+	session := newSession(t, script(
+		text(""),
+		pick("Whole video"),
+		pick("‹ Back"),
+		pick("‹ Back"),
+		text(""),
+	), func(options *app.Options) {
 		options.InitialURL = link
-	}).run()
+	})
+	session.prompter.autoWholeVideo = false
+	session.run()
 
 	if len(session.prompter.prefills) != 2 {
 		t.Fatalf("the link was asked %d times, want 2", len(session.prompter.prefills))
@@ -212,9 +220,124 @@ func TestSectionIsShownAndPassedToDownloader(t *testing.T) {
 	if session.err != nil {
 		t.Fatalf("Run() = %v, want nil", session.err)
 	}
-	session.requireDrawn("Section", "0:30-1:20")
+	session.requireDrawn("Time range", "0:30-1:20")
+	session.requireNotAsked("Time range")
 	session.requireArgs("--download-sections", "*0:30-1:20")
 	session.requireScripted()
+}
+
+func TestInteractiveWholeVideoKeepsTheFullDownload(t *testing.T) {
+	session := newSession(t, script(
+		text(link),
+		pick("Whole video"),
+		pick("Video"),
+		pick("Best available"),
+		pick("MKV"),
+		pick("Download"),
+		pick("Quit"),
+	))
+	session.prompter.autoWholeVideo = false
+	session.run()
+
+	session.requireScripted()
+	session.requireAsked("Time range")
+	session.requireNotDrawn("Time range: ")
+	session.requireArgs("-f", "bv*+ba/b")
+}
+
+func TestInteractiveRangeIsValidatedShownAndDownloaded(t *testing.T) {
+	trimmer := &fakeTrimmer{}
+	session := newSession(t, script(
+		text(link),
+		pick("Choose a range"),
+		text("00:30-01:20"),
+		pick("Video"),
+		pick("Best available"),
+		pick("MKV"),
+		pick("Download"),
+		pick("Quit"),
+	), func(options *app.Options) {
+		options.Trimmer = trimmer
+	})
+	session.prompter.autoWholeVideo = false
+	session.run()
+
+	session.requireScripted()
+	session.requireDrawn("Time range", "0:30-1:20")
+	session.requireArgs("--download-sections", "*0:30-1:20")
+	if trimmer.section != (domain.TimeRange{Start: 30, End: 80}) {
+		t.Fatalf("trimmer section = %#v, want 30-80", trimmer.section)
+	}
+}
+
+func TestInteractiveRangeRetriesInvalidInput(t *testing.T) {
+	session := newSession(t, script(
+		text(link),
+		pick("Choose a range"),
+		text("00:30"),
+		text("01:30-03:00"),
+		text("00:30-01:20"),
+		pick("Video"),
+		pick("Best available"),
+		pick("MKV"),
+		pick("Quit"),
+	))
+	session.prompter.autoWholeVideo = false
+	session.run()
+
+	session.requireScripted()
+	session.requireDrawn("That time range is not valid", "section end 3:00 exceeds video duration")
+	if len(session.prompter.prefills) != 4 {
+		t.Fatalf("time-range retries recorded %d text prefills, want URL plus three empty range prefills", len(session.prompter.prefills))
+	}
+	for index, initial := range session.prompter.prefills[1:] {
+		if initial != "" {
+			t.Fatalf("range retry %d was prefilled with %q, want empty", index+1, initial)
+		}
+	}
+	if session.downloader.runs != 0 {
+		t.Fatalf("downloader ran %d times after invalid input, want zero", session.downloader.runs)
+	}
+}
+
+func TestInteractiveRangeCanBeChangedFromReview(t *testing.T) {
+	session := newSession(t, script(
+		text(link),
+		pick("Choose a range"),
+		text("00:30-01:20"),
+		pick("Video"),
+		pick("Best available"),
+		pick("MKV"),
+		pick("Change time range"),
+		pick("Choose a range"),
+		text("00:40-01:10"),
+		pick("Download"),
+		pick("Quit"),
+	))
+	session.prompter.autoWholeVideo = false
+	session.run()
+
+	session.requireScripted()
+	session.requireArgs("--download-sections", "*0:40-1:10")
+	if strings.Contains(strings.Join(session.downloader.args, " "), "*0:30-1:20") {
+		t.Fatalf("downloader kept the old range: %v", session.downloader.args)
+	}
+}
+
+func TestInteractiveRangeBackReturnsToTheURL(t *testing.T) {
+	session := newSession(t, script(
+		text(link),
+		pick("‹ Back"),
+		text(link),
+		pick("‹ Back"),
+	))
+	session.prompter.autoWholeVideo = false
+	session.run()
+
+	session.requireScripted()
+	if count := strings.Count(strings.Join(session.prompter.questions, "\n"), "Paste a media URL"); count != 3 {
+		t.Fatalf("URL prompt appeared %d times, want 3 after two range-menu backs", count)
+	}
 }
 
 func TestSectionBeyondVideoDurationStopsBeforeDownload(t *testing.T) {
