@@ -1,0 +1,35 @@
+# Release and local build output
+dist/
+/bin/
+/build/
+/caxxxd
+/cmd/caxxxd/caxxxd
+*.test
+*.out
+coverage.out
+*.prof
+
+# Local live tests, downloaded media, and temporary diagnostics
+.scratch/
+*.part
+*.log
+*.tmp
+*.temp
+*.bak
+/downloads/
+/Downloads/
+
+# Local configuration and environment files
+.env
+.env.*
+!.env.example
+
+# macOS and editor metadata
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.idea/
+.vscode/
+*.swp
+*.swo

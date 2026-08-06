@@ -1,0 +1,16 @@
+{
+  "id": "abc123",
+  "title": "Example Video",
+  "uploader": "Example Channel",
+  "extractor_key": "Youtube",
+  "duration": 125.4,
+  "webpage_url": "https://www.youtube.com/watch?v=abc123",
+  "thumbnail": "https://i.example/abc123.jpg",
+  "formats": [
+    {"format_id":"18","ext":"mp4","width":640,"height":360,"fps":30,"vcodec":"avc1.42001E","acodec":"mp4a.40.2","tbr":550,"filesize":10000000},
+    {"format_id":"137","ext":"mp4","width":1920,"height":1080,"fps":30,"vcodec":"avc1.640028","acodec":"none","vbr":4500,"filesize":75000000},
+    {"format_id":"248","ext":"webm","width":1920,"height":1080,"fps":30,"vcodec":"vp9","acodec":"none","vbr":3000,"filesize_approx":52000000},
+    {"format_id":"140","ext":"m4a","vcodec":"none","acodec":"mp4a.40.2","abr":129,"asr":44100,"filesize":2100000},
+    {"format_id":"251","ext":"webm","vcodec":"none","acodec":"opus","abr":135,"asr":48000,"filesize_approx":2200000}
+  ]
+}

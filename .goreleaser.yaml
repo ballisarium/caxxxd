@@ -1,0 +1,80 @@
+version: 2
+
+project_name: caxxxd
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: caxxxd
+    main: ./cmd/caxxxd
+    binary: caxxxd
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w -X main.version={{.Version}}
+    # macOS only: the app reveals finished files with "open -R", and the
+    # Homebrew cask below is a macOS artefact either way. A Linux build
+    # compiles, but nothing here has been run on one.
+    goos:
+      - darwin
+    goarch:
+      - arm64
+      - amd64
+
+archives:
+  - id: caxxxd
+    formats: [tar.gz]
+    name_template: "caxxxd_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - README.md
+      - LICENSE
+
+checksum:
+  name_template: "caxxxd_{{ .Version }}_checksums.txt"
+
+changelog:
+  use: github
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+
+release:
+  draft: false
+  prerelease: auto
+
+# A cask rather than a formula: Homebrew wants pre-built binaries installed as
+# casks, and GoReleaser has deprecated the "brews" section that produced them.
+homebrew_casks:
+  - name: caxxxd
+    binaries:
+      - caxxxd
+    homepage: "https://github.com/ballisarium/caxxxd"
+    description: "Terminal wrapper around yt-dlp for downloading video and audio"
+    license: "MIT"
+
+    repository:
+      owner: ballisarium
+      name: homebrew-tap
+      # The workflow's own GITHUB_TOKEN only reaches this repository, so
+      # pushing the cask into the tap needs a token of its own.
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+
+    # caxxxd drives these two and installs neither, so Homebrew brings them
+    # along: the dependency check passes on a first run.
+    dependencies:
+      - formula: yt-dlp
+      - formula: ffmpeg
+
+    hooks:
+      post:
+        install: |
+          if system_command("/usr/bin/xattr", args: ["-h"]).exit_status == 0
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/caxxxd"]
+          end

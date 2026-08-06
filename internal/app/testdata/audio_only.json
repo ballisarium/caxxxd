@@ -1,0 +1,13 @@
+{
+  "id": "pod777",
+  "title": "Example Podcast Episode",
+  "uploader": "Example Radio",
+  "extractor_key": "SoundCloud",
+  "duration": 3725.0,
+  "webpage_url": "https://soundcloud.example/example/pod777",
+  "thumbnail": "https://i.example/pod777.jpg",
+  "formats": [
+    {"format_id":"hls-64","ext":"m4a","vcodec":"none","acodec":"mp4a.40.5","abr":64,"asr":44100,"filesize_approx":29800000},
+    {"format_id":"http-128","ext":"mp3","vcodec":"none","acodec":"mp3","abr":128,"asr":44100,"filesize":59600000}
+  ]
+}

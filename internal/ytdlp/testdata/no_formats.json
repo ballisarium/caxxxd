@@ -1,0 +1,10 @@
+{
+  "id": "empty1",
+  "title": "Unavailable Item",
+  "uploader": "Example Channel",
+  "extractor_key": "Youtube",
+  "duration": 0,
+  "webpage_url": "https://www.youtube.com/watch?v=empty1",
+  "thumbnail": "",
+  "formats": []
+}

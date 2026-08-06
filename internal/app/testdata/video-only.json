@@ -1,0 +1,12 @@
+{
+  "id": "silent1",
+  "title": "Example Silent Clip",
+  "uploader": "Example Archive",
+  "extractor_key": "Generic",
+  "duration": 42.0,
+  "webpage_url": "https://example.test/silent",
+  "formats": [
+    {"format_id":"v1","ext":"mp4","width":1280,"height":720,"fps":25,"vcodec":"avc1.4d401f","acodec":"none","vbr":1800,"filesize":9400000},
+    {"format_id":"v2","ext":"webm","width":640,"height":360,"fps":25,"vcodec":"vp9","acodec":"none","vbr":600,"filesize":3100000}
+  ]
+}

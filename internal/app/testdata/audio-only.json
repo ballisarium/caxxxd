@@ -1,0 +1,11 @@
+{
+  "id": "sound1",
+  "title": "Example Track",
+  "uploader": "Example Label",
+  "extractor_key": "Bandcamp",
+  "duration": 214.0,
+  "webpage_url": "https://example.test/track",
+  "formats": [
+    {"format_id":"mp3-128","ext":"mp3","vcodec":"none","acodec":"mp3","abr":128,"asr":44100,"filesize":3400000}
+  ]
+}
