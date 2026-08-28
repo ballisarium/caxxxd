@@ -37,6 +37,44 @@ func TestBuildMP3Audio(t *testing.T) {
 	assertContainsSequence(t, args, "-x", "--audio-format", "mp3", "--audio-quality", "0")
 }
 
+func TestBuildManualSubtitleDownloadSkipsTheMedia(t *testing.T) {
+	args, err := ytdlp.BuildCommand(ytdlp.DownloadRequest{
+		URL:              "https://example.test/video",
+		Mode:             domain.MediaModeSubtitles,
+		OutputDir:        "/tmp/out",
+		SubtitleLanguage: "ru",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	assertContainsSequence(t, args, "--skip-download")
+	assertContainsSequence(t, args, "--ignore-no-formats-error")
+	assertContainsSequence(t, args, "--write-subs", "--no-write-auto-subs")
+	assertContainsSequence(t, args, "--sub-langs", "^ru$")
+	assertContainsSequence(t, args, "--sub-format", "srt/vtt/best", "--convert-subs", "srt")
+	assertLacks(t, args, "-f")
+}
+
+func TestBuildAutomaticSubtitleDownloadUsesOnlyAutomaticCaptions(t *testing.T) {
+	section := domain.TimeRange{Start: 30, End: 80}
+	args, err := ytdlp.BuildCommand(ytdlp.DownloadRequest{
+		URL:               "https://example.test/video",
+		Mode:              domain.MediaModeSubtitles,
+		OutputDir:         "/tmp/out",
+		SubtitleLanguage:  "en-US",
+		SubtitleAutomatic: true,
+		Section:           &section,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	assertContainsSequence(t, args, "--no-write-subs", "--write-auto-subs")
+	assertContainsSequence(t, args, "--sub-langs", "^en-US$")
+	assertLacks(t, args, "--download-sections")
+}
+
 func TestBuildSectionDownloadUsesTheTimeRangeAndDistinctOutputName(t *testing.T) {
 	section := domain.TimeRange{Start: 330, End: 380}
 	args, err := ytdlp.BuildCommand(ytdlp.DownloadRequest{

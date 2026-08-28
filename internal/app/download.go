@@ -3,12 +3,14 @@ package app
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"strconv"
 	"strings"
 
+	"github.com/ballisarium/caxxxd/internal/domain"
 	"github.com/ballisarium/caxxxd/internal/ui"
 	"github.com/ballisarium/caxxxd/internal/ytdlp"
 )
@@ -24,8 +26,44 @@ const (
 
 // runDownload turns the selection into a real file, or into an explanation.
 func (a *App) runDownload(ctx context.Context) (stage, error) {
-	args, err := ytdlp.BuildCommand(a.request())
+	request := a.request()
+	var subtitleDirectory string
+	cleanupSubtitles := func() error {
+		if subtitleDirectory == "" {
+			return nil
+		}
+		if err := os.RemoveAll(subtitleDirectory); err != nil {
+			return fmt.Errorf("remove temporary subtitles: %w", err)
+		}
+		subtitleDirectory = ""
+		return nil
+	}
+	if a.mode == domain.MediaModeSubtitles {
+		if err := os.MkdirAll(a.outputDir, 0o755); err != nil {
+			return a.reportFailure(
+				classifyDownloadError(&outputDirError{err: err}, nil),
+				recovery{"Back to the review", "choose another folder", stageReview},
+			)
+		}
+		var err error
+		subtitleDirectory, err = os.MkdirTemp(a.outputDir, ".caxxxd-subtitles-*")
+		if err != nil {
+			return a.reportFailure(
+				classifyDownloadError(&outputDirError{err: err}, nil),
+				recovery{"Back to the review", "choose another folder", stageReview},
+			)
+		}
+		request.OutputDir = subtitleDirectory
+	}
+
+	args, err := ytdlp.BuildCommand(request)
 	if err != nil {
+		if cleanupErr := cleanupSubtitles(); cleanupErr != nil {
+			return a.reportFailure(
+				classifyTranscriptError(cleanupErr),
+				recovery{"Back to the review", "pick something else", stageReview},
+			)
+		}
 		return a.reportFailure(Failure{
 			Category: FailureTool,
 			NextStep: "That selection cannot be turned into a download: " + err.Error(),
@@ -39,6 +77,10 @@ func (a *App) runDownload(ctx context.Context) (stage, error) {
 	// The destination is created here rather than when it was typed: a folder
 	// is only worth making once something is actually going into it.
 	if err := os.MkdirAll(a.outputDir, 0o755); err != nil {
+		cleanupErr := cleanupSubtitles()
+		if cleanupErr != nil {
+			err = errors.Join(err, cleanupErr)
+		}
 		return a.reportFailure(
 			classifyDownloadError(&outputDirError{err: err}, nil),
 			recovery{"Back to the review", "choose another folder", stageReview},
@@ -53,6 +95,14 @@ func (a *App) runDownload(ctx context.Context) (stage, error) {
 
 	switch result {
 	case outcomeCancelled:
+		if a.mode == domain.MediaModeSubtitles {
+			body := []string{"No transcript was written."}
+			if cleanupErr := cleanupSubtitles(); cleanupErr != nil {
+				body = append(body, cleanupErr.Error())
+			}
+			a.carry("Subtitle download cancelled", body...)
+			return stageReview, nil
+		}
 		// yt-dlp writes to a .part file and is not told otherwise, so what it
 		// had downloaded is still on disk. Saying it was discarded would be a
 		// tidier sentence and a false one.
@@ -62,6 +112,9 @@ func (a *App) runDownload(ctx context.Context) (stage, error) {
 		return stageReview, nil
 
 	case outcomeFailed:
+		if cleanupErr := cleanupSubtitles(); cleanupErr != nil {
+			a.appendLog(cleanupErr.Error())
+		}
 		if ctx.Err() != nil {
 			// The whole program is going down, not just this download.
 			return stageReview, ctx.Err()
@@ -73,7 +126,38 @@ func (a *App) runDownload(ctx context.Context) (stage, error) {
 		)
 
 	default:
-		if a.options.Section != nil {
+		if a.mode == domain.MediaModeSubtitles {
+			runCtx, stop := signal.NotifyContext(ctx, os.Interrupt)
+			err := a.finishTranscript(runCtx, subtitleDirectory)
+			conversionCancelled := runCtx.Err() != nil && ctx.Err() == nil
+			stop()
+			cleanupErr := cleanupSubtitles()
+			if ctx.Err() != nil {
+				return stageReview, ctx.Err()
+			}
+			if conversionCancelled {
+				body := []string{"No transcript was written."}
+				if cleanupErr != nil {
+					body = append(body, cleanupErr.Error())
+				}
+				a.carry("Subtitle conversion cancelled", body...)
+				return stageReview, nil
+			}
+			if err != nil {
+				a.failure = classifyTranscriptError(err)
+				return a.reportFailure(a.failure,
+					recovery{"Try again", "download the same subtitle track again", stageDownload},
+					recovery{"Change something", "go back to the review", stageReview},
+				)
+			}
+			if cleanupErr != nil {
+				a.failure = classifyTranscriptError(cleanupErr)
+				return a.reportFailure(a.failure,
+					recovery{"Try cleanup again", "download and replace the same transcript", stageDownload},
+					recovery{"Change something", "go back to the review", stageReview},
+				)
+			}
+		} else if a.options.Section != nil {
 			sectionOutcome, sectionErr := a.trimSection(ctx)
 			switch sectionOutcome {
 			case outcomeCancelled:
@@ -94,6 +178,41 @@ func (a *App) runDownload(ctx context.Context) (stage, error) {
 		}
 		return a.reportSuccess()
 	}
+}
+
+func (a *App) finishTranscript(ctx context.Context, directory string) error {
+	entries, err := os.ReadDir(directory)
+	if err != nil {
+		return fmt.Errorf("read downloaded subtitles: %w", err)
+	}
+
+	var source string
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.EqualFold(filepath.Ext(entry.Name()), ".srt") {
+			continue
+		}
+		if source != "" {
+			return errors.New("yt-dlp produced more than one subtitle file for the selected track")
+		}
+		source = filepath.Join(directory, entry.Name())
+	}
+	if source == "" {
+		return errors.New("yt-dlp did not produce an SRT subtitle file")
+	}
+
+	name := strings.TrimSuffix(filepath.Base(source), filepath.Ext(source)) + ".txt"
+	destination := filepath.Join(a.outputDir, name)
+	if err := a.options.TranscriptConverter.Convert(
+		ctx,
+		source,
+		destination,
+		a.subtitle.Automatic,
+		a.options.Section,
+	); err != nil {
+		return err
+	}
+	a.completedPath = destination
+	return nil
 }
 
 // trimSection repairs the timestamps left by independent remote DASH streams.
@@ -180,7 +299,11 @@ func (a *App) stream(ctx context.Context, args []string) (outcome, error) {
 				// screen for as long as the merge takes. The view animates and
 				// counts the wait rather than freezing on its last frame.
 				phase = "postprocess"
-				progress.Show(ui.Sample{Detail: "Merging streams and writing metadata"})
+				detail := "Merging streams and writing metadata"
+				if a.mode == domain.MediaModeSubtitles {
+					detail = "Preparing subtitles"
+				}
+				progress.Show(ui.Sample{Detail: detail})
 
 			case ytdlp.EventCompletedFile:
 				a.completedPath = event.Parsed.FilePath

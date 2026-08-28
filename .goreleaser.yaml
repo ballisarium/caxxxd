@@ -56,7 +56,7 @@ homebrew_casks:
     binaries:
       - caxxxd
     homepage: "https://github.com/ballisarium/caxxxd"
-    description: "Terminal wrapper around yt-dlp for downloading video and audio"
+    description: "Terminal wrapper around yt-dlp for downloading video, audio, and subtitles"
     license: "MIT"
 
     repository:

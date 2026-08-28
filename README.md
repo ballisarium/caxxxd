@@ -4,9 +4,10 @@
 
 there are plenty of `yt-dlp` wrappers. this one is mine.
 
-`caxxxd` is a small, opinionated terminal frontend for downloading video and
-audio on macOS. it turns the usual pile of format selectors, container flags,
-and ffmpeg choices into a short conversation you can actually follow.
+`caxxxd` is a small, opinionated terminal frontend for downloading video,
+audio, or plain-text subtitles on macOS. it turns the usual pile of format
+selectors, container flags, and ffmpeg choices into a short conversation you
+can actually follow.
 
 ![caxxxd waiting for a media URL](docs/screen.png)
 
@@ -22,6 +23,7 @@ you can expect:
   * time-range downloads that fetch only the requested section when the source
     supports seeking
   * friendly video and audio presets for the common cases
+  * uploaded and automatic subtitles as clean UTF-8 text without the media
   * an exact stream table when the preset is not enough
   * real progress with size, speed, ETA, and post-processing state
   * a remembered download folder
@@ -67,7 +69,7 @@ version. if a feature is not right for you, delete it or make a better one.
 
 `caxxxd` keeps the boundary with the external tools intentionally boring:
 
-  * `yt-dlp --dump-single-json` provides metadata and format information
+  * `yt-dlp --dump-single-json` provides metadata, formats, and subtitle tracks
   * a structured progress template provides download events
   * command arguments are assembled as a slice, never as a shell string
   * `ffmpeg` handles merging, remuxing, and requested audio conversions
@@ -191,14 +193,18 @@ Time range: 00:30-01:20
 Use SS, MM:SS, or HH:MM:SS. Video duration: 2:05.
 ```
 
-the range is passed to `yt-dlp` as `--download-sections`, so the source is
-sought directly whenever the selected format allows it. after yt-dlp has
-merged the short result, caxxxd reads the first local media packet and runs
-one timestamp-normalization pass with `ffmpeg -ss LOCAL_START -t LENGTH
--c copy`. this accounts for keyframe padding and independent video/audio
-timestamps without seeking past the already-short file. the result replaces
-the downloaded file atomically, which keeps independently fetched video and
-audio streams on one clean timeline.
+for video and audio, the range is passed to `yt-dlp` as
+`--download-sections`, so the source is sought directly whenever the selected
+format allows it. after yt-dlp has merged the short result, caxxxd reads the
+first local media packet and runs one timestamp-normalization pass with
+`ffmpeg -ss LOCAL_START -t LENGTH -c copy`. this accounts for keyframe padding
+and independent video/audio timestamps without seeking past the already-short
+file. the result replaces the downloaded file atomically, which keeps
+independently fetched video and audio streams on one clean timeline.
+
+subtitle tracks are small and carry their own cue times, so caxxxd downloads
+the selected track without video or audio and filters its cues locally. it
+never invokes the media clipping pass.
 
 caxxxd does not force keyframes or do a full re-encode. stream copy keeps
 clipping fast and leaves the original codecs untouched. as a result, the
@@ -259,6 +265,22 @@ FLAC and WAV cannot recover detail that a lossy source already discarded.
 `caxxxd` warns before those conversions instead of pretending that a larger
 file is automatically a better source.
 
+### subtitles
+
+subtitle mode downloads one uploaded or automatic language track without the
+video or audio. uploaded tracks are listed first; automatic tracks are kept
+separate and labelled because speech recognition can be wrong.
+
+the output is one UTF-8 `.txt` file. caxxxd removes cue numbers, timestamps,
+SRT/VTT styling, and repeated rolling text from automatic captions. line
+breaks and meaningful cues such as `[Music]` remain readable. the temporary
+subtitle file is removed before success is reported, and the TXT replaces its
+destination atomically only after conversion succeeds.
+
+if the source has no subtitle tracks, caxxxd says so before starting a
+download. it does not transcribe speech from the audio; that would be a
+different feature.
+
 ## limitations
 
 this is a focused tool, not a complete media manager:
@@ -269,8 +291,8 @@ this is a focused tool, not a complete media manager:
     Finder
   * an interactive TTY is the intended surface; redirected output is not yet
     a clean, feature-equivalent transcript mode
-  * cancelling a download can leave a `.part` file so a later run can resume
-    it
+  * cancelling a video or audio download can leave a `.part` file so a later
+    run can resume it; cancelling subtitles leaves no partial transcript
 
 ## repository layout
 
@@ -278,8 +300,8 @@ this is a focused tool, not a complete media manager:
   * `internal/app/`: five-step flow and download lifecycle
   * `internal/ui/`: palette, terminal chrome, editor, menus, and live progress
   * `internal/domain/`: media modes, containers, presets, and shared vocabulary
-  * `internal/ytdlp/`: metadata, format normalization, command building, and
-    process streaming
+  * `internal/ytdlp/`: metadata, format normalization, command building,
+    subtitle-to-text conversion, and process streaming
   * `internal/deps/`: `yt-dlp` and `ffmpeg` detection
   * `internal/config/`: persisted preferences
   * `internal/process/`: Unix process-group termination

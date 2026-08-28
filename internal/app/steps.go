@@ -24,6 +24,7 @@ const (
 	stageVideoQuality
 	stageVideoContainer
 	stageAudioFormat
+	stageSubtitleTrack
 	stageManualVideo
 	stageManualAudio
 	stageReview
@@ -79,7 +80,7 @@ func (a *App) screen(current stage) {
 func showsMedia(current stage) bool {
 	switch current {
 	case stageRange, stageMode, stageVideoQuality, stageVideoContainer,
-		stageAudioFormat, stageManualVideo, stageManualAudio:
+		stageAudioFormat, stageSubtitleTrack, stageManualVideo, stageManualAudio:
 		return true
 	default:
 		return false
@@ -103,6 +104,8 @@ func (a *App) step(ctx context.Context, current stage) (stage, error) {
 		return a.askContainer()
 	case stageAudioFormat:
 		return a.askAudioFormat()
+	case stageSubtitleTrack:
+		return a.askSubtitleTrack()
 	case stageManualVideo:
 		return a.askManualVideo()
 	case stageManualAudio:
@@ -231,6 +234,7 @@ func (a *App) askMode() (stage, error) {
 	choices := []Choice{
 		{Label: "Video", Detail: "picture and sound, merged into one file"},
 		{Label: "Audio", Detail: "sound only, ready for a music library"},
+		{Label: "Subtitles", Detail: "plain text only, without video or audio"},
 		backChoice,
 	}
 
@@ -241,16 +245,59 @@ func (a *App) askMode() (stage, error) {
 
 	switch picked {
 	case 0:
+		if len(a.info.Formats) == 0 {
+			a.carry("No media streams available", "This item only offers subtitles. Choose Subtitles instead.")
+			return stageMode, nil
+		}
 		a.mode = domain.MediaModeVideo
 		a.clearManualSelection()
 		return stageVideoQuality, nil
 	case 1:
+		if len(a.info.Formats) == 0 {
+			a.carry("No media streams available", "This item only offers subtitles. Choose Subtitles instead.")
+			return stageMode, nil
+		}
 		a.mode = domain.MediaModeAudio
 		a.clearManualSelection()
 		return stageAudioFormat, nil
+	case 2:
+		if len(a.info.Subtitles) == 0 {
+			a.carry("No subtitles available", "This item has no uploaded or automatic subtitle tracks.")
+			return stageMode, nil
+		}
+		a.mode = domain.MediaModeSubtitles
+		a.clearManualSelection()
+		return stageSubtitleTrack, nil
 	default:
 		return stageRange, nil
 	}
+}
+
+// askSubtitleTrack picks exactly one language and source. Uploaded subtitles
+// come first in metadata order, with automatic captions labelled explicitly.
+func (a *App) askSubtitleTrack() (stage, error) {
+	choices := make([]Choice, 0, len(a.info.Subtitles)+1)
+	for _, track := range a.info.Subtitles {
+		source := "uploaded"
+		if track.Automatic {
+			source = "automatic"
+		}
+		choices = append(choices, Choice{
+			Label:  track.Name + " · " + source,
+			Detail: track.Language,
+		})
+	}
+	choices = append(choices, backChoice)
+
+	picked, err := a.prompt.Choose("Subtitle language", choices, 0)
+	if err != nil {
+		return stageSubtitleTrack, err
+	}
+	if picked == len(choices)-1 {
+		return stageMode, nil
+	}
+	a.subtitle = a.info.Subtitles[picked]
+	return stageReview, nil
 }
 
 // askRange decides whether this item should be downloaded whole or clipped.
@@ -666,12 +713,23 @@ func (a *App) reviewFields() []ui.Field {
 				ui.Field{Label: "Container", Value: strings.ToUpper(string(a.container))},
 			)
 		}
-	} else {
+	} else if a.mode == domain.MediaModeAudio {
 		fields = append(fields, ui.Field{Label: "Mode", Value: "Audio"})
 		if a.manual.audioID != "" {
 			fields = append(fields, ui.Field{Label: "Stream", Value: a.manual.audioID})
 		}
 		fields = append(fields, ui.Field{Label: "Format", Value: audioFormatLabel(a.audioFormat)})
+	} else {
+		source := "Uploaded"
+		if a.subtitle.Automatic {
+			source = "Automatic"
+		}
+		fields = append(fields,
+			ui.Field{Label: "Mode", Value: "Subtitles"},
+			ui.Field{Label: "Language", Value: a.subtitle.Name + " (" + a.subtitle.Language + ")"},
+			ui.Field{Label: "Source", Value: source},
+			ui.Field{Label: "Format", Value: "Plain text (UTF-8)"},
+		)
 	}
 
 	return append(fields, ui.Field{Label: "Destination", Value: collapseHome(a.outputDir, a.options.Home)})
@@ -679,6 +737,9 @@ func (a *App) reviewFields() []ui.Field {
 
 // reviewReturn is the last stage that actually changed the selection.
 func (a *App) reviewReturn() stage {
+	if a.mode == domain.MediaModeSubtitles {
+		return stageSubtitleTrack
+	}
 	if a.mode == domain.MediaModeAudio {
 		if a.manual.audioID != "" {
 			return stageManualAudio

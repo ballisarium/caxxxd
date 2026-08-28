@@ -30,7 +30,7 @@ func sanitize(text string) string {
 			// These carry meaning in a single-line field: a space is the most
 			// they are allowed to mean.
 			return ' '
-		case character < 0x20, character == 0x7f:
+		case character < 0x20, character == 0x7f, character >= 0x80 && character <= 0x9f:
 			return -1
 		default:
 			return character

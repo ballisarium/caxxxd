@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 
 	"github.com/ballisarium/caxxxd/internal/ytdlp"
@@ -62,6 +63,14 @@ func TestFetchParsesMetadata(t *testing.T) {
 	if len(info.Formats) != 5 {
 		t.Fatalf("len(Formats) = %d, want 5", len(info.Formats))
 	}
+	wantSubtitles := []ytdlp.SubtitleTrack{
+		{Language: "en", Name: "English"},
+		{Language: "ru", Name: "Russian"},
+		{Language: "ru", Name: "Russian", Automatic: true},
+	}
+	if !reflect.DeepEqual(info.Subtitles, wantSubtitles) {
+		t.Fatalf("Subtitles = %#v, want %#v", info.Subtitles, wantSubtitles)
+	}
 }
 
 func TestFetchPassesStructuredFlags(t *testing.T) {
@@ -77,6 +86,7 @@ func TestFetchPassesStructuredFlags(t *testing.T) {
 	}
 	assertContainsSequence(t, runner.args, "--dump-single-json")
 	assertContainsSequence(t, runner.args, "--no-playlist")
+	assertContainsSequence(t, runner.args, "--write-subs", "--write-auto-subs")
 	if runner.args[len(runner.args)-1] != "https://example.test/watch?v=a&b=c" {
 		t.Fatalf("URL must be the final argument, got %q", runner.args[len(runner.args)-1])
 	}
@@ -132,6 +142,24 @@ func TestFetchReportsMissingFormats(t *testing.T) {
 
 	if _, err := client.Fetch(context.Background(), "https://example.test/video"); !errors.Is(err, ytdlp.ErrNoFormats) {
 		t.Fatalf("Fetch error = %v, want ErrNoFormats", err)
+	}
+}
+
+func TestFetchAcceptsAnItemWithOnlySubtitles(t *testing.T) {
+	payload := []byte(`{
+		"id":"text-only",
+		"title":"Transcript",
+		"subtitles":{"en":[{"ext":"vtt","name":"English"}]},
+		"formats":[]
+	}`)
+	client := ytdlp.Client{Binary: "yt-dlp", Runner: &fakeRunner{payload: payload}}
+
+	info, err := client.Fetch(context.Background(), "https://example.test/transcript")
+	if err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+	if len(info.Formats) != 0 || len(info.Subtitles) != 1 {
+		t.Fatalf("metadata = %#v", info)
 	}
 }
 

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/url"
 	"os/exec"
+	"sort"
 )
 
 // ErrNoFormats means yt-dlp understood the page but offered nothing to download.
@@ -48,6 +49,8 @@ func (c Client) Fetch(ctx context.Context, rawURL string) (MediaInfo, error) {
 		"--dump-single-json",
 		"--no-warnings",
 		"--no-playlist",
+		"--write-subs",
+		"--write-auto-subs",
 		rawURL,
 	)
 	if err != nil {
@@ -59,7 +62,8 @@ func (c Client) Fetch(ctx context.Context, rawURL string) (MediaInfo, error) {
 		return MediaInfo{}, fmt.Errorf("decode metadata: %w", err)
 	}
 	formats := NormalizeFormats(raw.Formats)
-	if len(formats) == 0 {
+	subtitles := normalizeSubtitles(raw.Subtitles, raw.AutomaticCaptions)
+	if len(formats) == 0 && len(subtitles) == 0 {
 		return MediaInfo{}, ErrNoFormats
 	}
 
@@ -79,5 +83,34 @@ func (c Client) Fetch(ctx context.Context, rawURL string) (MediaInfo, error) {
 		WebpageURL:   raw.WebpageURL,
 		ThumbnailURL: raw.Thumbnail,
 		Formats:      formats,
+		Subtitles:    subtitles,
 	}, nil
+}
+
+func normalizeSubtitles(manual, automatic map[string][]RawSubtitle) []SubtitleTrack {
+	tracks := make([]SubtitleTrack, 0, len(manual)+len(automatic))
+	appendTracks := func(source map[string][]RawSubtitle, generated bool) {
+		languages := make([]string, 0, len(source))
+		for language := range source {
+			if language != "live_chat" && language != "" && len(source[language]) > 0 {
+				languages = append(languages, language)
+			}
+		}
+		sort.Strings(languages)
+		for _, language := range languages {
+			name := sanitize(source[language][0].Name)
+			if name == "" {
+				name = sanitize(language)
+			}
+			tracks = append(tracks, SubtitleTrack{
+				Language:  sanitize(language),
+				Name:      name,
+				Automatic: generated,
+			})
+		}
+	}
+
+	appendTracks(manual, false)
+	appendTracks(automatic, true)
+	return tracks
 }

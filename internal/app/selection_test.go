@@ -116,6 +116,83 @@ func TestAudioPresetsProduceExpectedRequests(t *testing.T) {
 	}
 }
 
+func TestSubtitleTrackCanBeReviewedWithoutChoosingMediaFormats(t *testing.T) {
+	session := newSession(t, script(
+		text(link),
+		pick("Subtitles"),
+		pick("Russian · uploaded"),
+		pick("Quit"),
+	)).run()
+
+	session.requireScripted()
+	session.requireAsked("Subtitle language")
+	session.requireNotAsked("Video quality")
+	session.requireNotAsked("Audio format")
+	session.requireDrawn(
+		"Ready to download",
+		"Subtitles",
+		"Russian",
+		"Uploaded",
+		"Plain text (UTF-8)",
+	)
+}
+
+func TestAutomaticSubtitleTracksAreClearlyLabelled(t *testing.T) {
+	session := newSession(t, script(
+		text(link),
+		pick("Subtitles"),
+		pick("Russian · automatic"),
+		pick("Quit"),
+	)).run()
+
+	session.requireScripted()
+	labels := strings.Join(session.prompter.menuFor("Subtitle language"), "\n")
+	if !strings.Contains(labels, "English · uploaded") ||
+		!strings.Contains(labels, "Russian · uploaded") ||
+		!strings.Contains(labels, "Russian · automatic") {
+		t.Fatalf("subtitle choices = %q", labels)
+	}
+	session.requireDrawn("Automatic")
+}
+
+func TestMissingSubtitlesAreExplainedWithoutStartingADownload(t *testing.T) {
+	session := newSession(t, script(
+		text(link),
+		pick("Subtitles"),
+	), func(options *app.Options) {
+		options.Client = ytdlp.Client{Binary: "yt-dlp", Runner: stubRunner{payload: fixture(t, "audio_only.json")}}
+	}).run()
+
+	session.requireScripted()
+	session.requireDrawn("No subtitles available", "no uploaded or automatic subtitle tracks")
+	if session.downloader.runs != 0 {
+		t.Fatalf("downloader ran %d times without a subtitle track", session.downloader.runs)
+	}
+}
+
+func TestSubtitleOnlyMetadataRefusesMediaModesBeforeDownload(t *testing.T) {
+	payload := []byte(`{
+		"id":"text-only",
+		"title":"Transcript",
+		"duration":10,
+		"subtitles":{"en":[{"ext":"vtt","name":"English"}]},
+		"formats":[]
+	}`)
+	session := newSession(t, script(
+		text(link),
+		pick("Video"),
+		pick("Audio"),
+	), func(options *app.Options) {
+		options.Client = ytdlp.Client{Binary: "yt-dlp", Runner: stubRunner{payload: payload}}
+	}).run()
+
+	session.requireScripted()
+	session.requireDrawn("No media streams available", "Choose Subtitles instead")
+	if session.downloader.runs != 0 {
+		t.Fatalf("downloader ran %d times without media formats", session.downloader.runs)
+	}
+}
+
 func TestLosslessFormatsWarnBeforeTheyAreUsed(t *testing.T) {
 	session := newSession(t, script(
 		text(link),
@@ -371,6 +448,18 @@ func TestBackTransitions(t *testing.T) {
 				text(link), pick("Audio"), pick("Opus"), pick("‹ Back"),
 			},
 			want: "Audio format",
+		},
+		{
+			name:   "the subtitle track returns to the media choice",
+			script: []answer{text(link), pick("Subtitles"), pick("‹ Back")},
+			want:   "What do you want out of it?",
+		},
+		{
+			name: "the subtitle review returns to the language list",
+			script: []answer{
+				text(link), pick("Subtitles"), pick("Russian · uploaded"), pick("‹ Back"),
+			},
+			want: "Subtitle language",
 		},
 		{
 			name: "a manual review returns to the stream table",

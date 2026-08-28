@@ -23,6 +23,7 @@ const (
 	FailureOutputDirectory FailureCategory = "Output directory error"
 	FailureCancelled       FailureCategory = "Download cancelled"
 	FailureProcessing      FailureCategory = "Clipping failed"
+	FailureSubtitles       FailureCategory = "Subtitle conversion failed"
 )
 
 // Failure is what an error report shows: a category, a next step, and the raw
@@ -176,6 +177,18 @@ func classifyProcessingError(err error) Failure {
 	return Failure{
 		Category: FailureProcessing,
 		NextStep: "The section was downloaded, but ffmpeg could not finalize it. Try the same section again.",
+		Detail:   detail,
+	}
+}
+
+func classifyTranscriptError(err error) Failure {
+	detail := "caxxxd could not create the transcript"
+	if err != nil {
+		detail = strings.TrimSpace(err.Error())
+	}
+	return Failure{
+		Category: FailureSubtitles,
+		NextStep: "The subtitle track was downloaded, but caxxxd could not turn it into plain text. Try the same track again.",
 		Detail:   detail,
 	}
 }

@@ -77,6 +77,7 @@ type fakeDownloader struct {
 	startErr error
 	args     []string
 	runs     int
+	onStart  func([]string)
 }
 
 func newFakeDownloader(events ...ytdlp.RunEvent) *fakeDownloader {
@@ -96,6 +97,9 @@ func (f *fakeDownloader) setScripts(scripts ...[]ytdlp.RunEvent) {
 func (f *fakeDownloader) Start(ctx context.Context, args []string) (<-chan ytdlp.RunEvent, error) {
 	f.args = args
 	f.runs++
+	if f.onStart != nil {
+		f.onStart(args)
+	}
 	if f.startErr != nil {
 		return nil, f.startErr
 	}

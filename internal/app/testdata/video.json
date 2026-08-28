@@ -6,6 +6,13 @@
   "duration": 125.4,
   "webpage_url": "https://www.youtube.com/watch?v=abc123",
   "thumbnail": "https://i.example/abc123.jpg",
+  "subtitles": {
+    "en": [{"ext":"vtt","name":"English"}],
+    "ru": [{"ext":"srt","name":"Russian"}]
+  },
+  "automatic_captions": {
+    "ru": [{"ext":"vtt","name":"Russian"}]
+  },
   "formats": [
     {"format_id":"18","ext":"mp4","width":640,"height":360,"fps":30,"vcodec":"avc1.42001E","acodec":"mp4a.40.2","tbr":550,"filesize":10000000},
     {"format_id":"137","ext":"mp4","width":1920,"height":1080,"fps":30,"vcodec":"avc1.640028","acodec":"none","vbr":4500,"filesize":75000000},

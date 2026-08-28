@@ -45,21 +45,28 @@ type Trimmer interface {
 	Trim(ctx context.Context, path string, section domain.TimeRange) error
 }
 
+// TranscriptConverter turns yt-dlp's temporary subtitle file into the final
+// plain-text output.
+type TranscriptConverter interface {
+	Convert(ctx context.Context, source, destination string, automatic bool, section *domain.TimeRange) error
+}
+
 // Options carries the flow's dependencies. Anything left zero-valued is filled
 // in with the real implementation, so tests inject only what they care about.
 type Options struct {
-	InitialURL  string
-	Section     *domain.TimeRange
-	Version     string
-	Checker     deps.Checker
-	Client      ytdlp.Client
-	Downloader  Downloader
-	Trimmer     Trimmer
-	ConfigStore config.Store
-	RevealFile  func(string) error
-	Home        string
-	Console     *ui.Console
-	Prompter    Prompter
+	InitialURL          string
+	Section             *domain.TimeRange
+	Version             string
+	Checker             deps.Checker
+	Client              ytdlp.Client
+	Downloader          Downloader
+	Trimmer             Trimmer
+	TranscriptConverter TranscriptConverter
+	ConfigStore         config.Store
+	RevealFile          func(string) error
+	Home                string
+	Console             *ui.Console
+	Prompter            Prompter
 }
 
 // manualSelection is an exact pick from the stream table. A muxed stream needs
@@ -96,6 +103,7 @@ type App struct {
 	container   domain.VideoContainer
 	audioFormat domain.AudioFormat
 	manual      manualSelection
+	subtitle    ytdlp.SubtitleTrack
 
 	logs          []string
 	failure       Failure
@@ -169,6 +177,9 @@ func withDefaults(options Options) Options {
 	}
 	if options.Trimmer == nil {
 		options.Trimmer = ytdlp.Trimmer{Binary: "ffmpeg"}
+	}
+	if options.TranscriptConverter == nil {
+		options.TranscriptConverter = ytdlp.TranscriptConverter{}
 	}
 	if options.ConfigStore.Path == "" {
 		options.ConfigStore = config.NewStore(defaultConfigPath())
@@ -395,6 +406,9 @@ func (a *App) request() ytdlp.DownloadRequest {
 	case domain.MediaModeAudio:
 		request.AudioFormat = a.audioFormat
 		request.AudioFormatID = a.manual.audioID
+	case domain.MediaModeSubtitles:
+		request.SubtitleLanguage = a.subtitle.Language
+		request.SubtitleAutomatic = a.subtitle.Automatic
 	}
 
 	return request
@@ -430,6 +444,7 @@ func (a *App) resetForNextDownload() {
 	}
 	a.mode = ""
 	a.maxHeight = 0
+	a.subtitle = ytdlp.SubtitleTrack{}
 	a.logs = nil
 	a.failure = Failure{}
 	a.completedPath = ""

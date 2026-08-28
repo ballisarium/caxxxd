@@ -2,12 +2,13 @@
 // what kind of media the user wants and which container or codec it lands in.
 package domain
 
-// MediaMode is the top-level choice between keeping the picture or only the sound.
+// MediaMode is the top-level choice between media streams and plain subtitles.
 type MediaMode string
 
 const (
-	MediaModeVideo MediaMode = "video"
-	MediaModeAudio MediaMode = "audio"
+	MediaModeVideo     MediaMode = "video"
+	MediaModeAudio     MediaMode = "audio"
+	MediaModeSubtitles MediaMode = "subtitles"
 )
 
 // VideoContainer is the container caxxxd asks yt-dlp to merge streams into.

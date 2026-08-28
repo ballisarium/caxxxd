@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/ballisarium/caxxxd/internal/app"
@@ -50,6 +51,210 @@ func TestDownloadCreatesTheOutputDirectory(t *testing.T) {
 		t.Fatalf("the destination was not created: %v", err)
 	}
 	session.requireArgs("-P", session.outputDir)
+}
+
+func TestSubtitleDownloadProducesOnlyAPlainTextFile(t *testing.T) {
+	downloader := newFakeDownloader(doneEvent(nil))
+	downloader.onStart = func(args []string) {
+		directory := argumentAfter(args, "-P")
+		source := filepath.Join(directory, "Example Video [abc123].ru.srt")
+		contents := "1\n00:00:00,000 --> 00:00:02,000\nПривет, мир!\n"
+		if err := os.WriteFile(source, []byte(contents), 0o600); err != nil {
+			t.Fatalf("write subtitle source: %v", err)
+		}
+	}
+
+	session := newSession(t, script(
+		text(link),
+		pick("Subtitles"),
+		pick("Russian · uploaded"),
+		pick("Download"),
+		pick("Quit"),
+	), func(options *app.Options) {
+		options.Downloader = downloader
+	}).run()
+
+	session.requireScripted()
+	session.requireArgs("--skip-download", "--write-subs", "--no-write-auto-subs")
+	files, err := os.ReadDir(session.outputDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) != 1 || files[0].Name() != "Example Video [abc123].ru.txt" {
+		t.Fatalf("output files = %v, want one TXT", directoryNames(files))
+	}
+	payload, err := os.ReadFile(filepath.Join(session.outputDir, files[0].Name()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(payload) != "Привет, мир!\n" {
+		t.Fatalf("transcript = %q", payload)
+	}
+	session.requireDrawn("Download complete", "Example Video [abc123].ru.txt")
+}
+
+func TestSubtitleTemporaryFilesAreGoneBeforeFinderCanOpen(t *testing.T) {
+	downloader := newFakeDownloader(doneEvent(nil))
+	downloader.onStart = func(args []string) {
+		directory := argumentAfter(args, "-P")
+		contents := "1\n00:00:00,000 --> 00:00:02,000\nReady\n"
+		if err := os.WriteFile(filepath.Join(directory, "captions.en.srt"), []byte(contents), 0o600); err != nil {
+			t.Fatalf("write subtitle source: %v", err)
+		}
+	}
+	revealed := false
+	visible := ""
+
+	session := newSession(t, script(
+		text(link),
+		pick("Subtitles"),
+		pick("English · uploaded"),
+		pick("Download"),
+		pick("Reveal in Finder"),
+		pick("Quit"),
+	), func(options *app.Options) {
+		options.Downloader = downloader
+		options.RevealFile = func(target string) error {
+			revealed = true
+			entries, err := os.ReadDir(filepath.Dir(target))
+			if err != nil {
+				visible = err.Error()
+				return nil
+			}
+			if len(entries) != 1 || entries[0].Name() != filepath.Base(target) {
+				visible = directoryNames(entries)
+			}
+			return nil
+		}
+	}).run()
+
+	session.requireScripted()
+	if !revealed {
+		t.Fatal("Finder was not asked to reveal the transcript")
+	}
+	if visible != "" {
+		t.Fatalf("unexpected files visible in Finder: %s", visible)
+	}
+}
+
+func TestCancelledSubtitleDownloadLeavesNoPartialTranscript(t *testing.T) {
+	downloader := newFakeDownloader(doneEvent(context.Canceled))
+	downloader.onStart = func(args []string) {
+		directory := argumentAfter(args, "-P")
+		if err := os.WriteFile(filepath.Join(directory, "partial.ru.srt"), []byte("partial"), 0o600); err != nil {
+			t.Fatalf("write partial subtitles: %v", err)
+		}
+	}
+
+	session := newSession(t, script(
+		text(link),
+		pick("Subtitles"),
+		pick("Russian · uploaded"),
+		pick("Download"),
+		pick("Quit"),
+	), func(options *app.Options) {
+		options.Downloader = downloader
+	}).run()
+
+	session.requireScripted()
+	session.requireDrawn("Subtitle download cancelled", "No transcript was written")
+	session.requireNotDrawn(".part file")
+	files, err := os.ReadDir(session.outputDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) != 0 {
+		t.Fatalf("cancelled subtitle files = %v", directoryNames(files))
+	}
+}
+
+func TestInvalidDownloadedSubtitlesDoNotReportSuccess(t *testing.T) {
+	downloader := newFakeDownloader(doneEvent(nil))
+	downloader.onStart = func(args []string) {
+		directory := argumentAfter(args, "-P")
+		if err := os.WriteFile(filepath.Join(directory, "broken.ru.srt"), []byte("not SRT"), 0o600); err != nil {
+			t.Fatalf("write broken subtitles: %v", err)
+		}
+	}
+
+	session := newSession(t, script(
+		text(link),
+		pick("Subtitles"),
+		pick("Russian · uploaded"),
+		pick("Download"),
+		pick("Show details"),
+		pick("Quit"),
+	), func(options *app.Options) {
+		options.Downloader = downloader
+	}).run()
+
+	session.requireScripted()
+	session.requireDrawn("Subtitle conversion failed", "no valid timing line")
+	session.requireNotDrawn("Download complete")
+	files, err := os.ReadDir(session.outputDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) != 0 {
+		t.Fatalf("failed subtitle files = %v", directoryNames(files))
+	}
+}
+
+func TestSubtitleRangeFiltersTextLocallyWithoutDownloadingMedia(t *testing.T) {
+	downloader := newFakeDownloader(doneEvent(nil))
+	downloader.onStart = func(args []string) {
+		directory := argumentAfter(args, "-P")
+		source := filepath.Join(directory, "Example Video [abc123].ru.srt")
+		contents := "1\n00:00:00,000 --> 00:00:02,000\nBefore\n\n" +
+			"2\n00:00:02,000 --> 00:00:03,000\nInside\n\n" +
+			"3\n00:00:04,000 --> 00:00:05,000\nAfter\n"
+		if err := os.WriteFile(source, []byte(contents), 0o600); err != nil {
+			t.Fatalf("write subtitle source: %v", err)
+		}
+	}
+	section := &domain.TimeRange{Start: 2, End: 4}
+
+	session := newSession(t, script(
+		text(link),
+		pick("Subtitles"),
+		pick("Russian · uploaded"),
+		pick("Download"),
+		pick("Quit"),
+	), func(options *app.Options) {
+		options.Section = section
+		options.Downloader = downloader
+	}).run()
+
+	session.requireScripted()
+	session.requireArgs("--skip-download")
+	if strings.Contains(strings.Join(downloader.args, "\n"), "--download-sections") {
+		t.Fatalf("subtitle command used media-only range flag: %q", downloader.args)
+	}
+	path := filepath.Join(session.outputDir, "Example Video [abc123].ru.txt")
+	payload, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(payload) != "Inside\n" {
+		t.Fatalf("range transcript = %q", payload)
+	}
+}
+
+func argumentAfter(args []string, flag string) string {
+	for index := range args {
+		if args[index] == flag && index+1 < len(args) {
+			return args[index+1]
+		}
+	}
+	return ""
+}
+
+func directoryNames(entries []os.DirEntry) string {
+	names := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		names = append(names, entry.Name())
+	}
+	return strings.Join(names, ", ")
 }
 
 func TestAnEstimatedTotalIsStillATotal(t *testing.T) {
