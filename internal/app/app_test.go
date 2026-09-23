@@ -250,7 +250,9 @@ func TestInteractiveRangeIsValidatedShownAndDownloaded(t *testing.T) {
 	session := newSession(t, script(
 		text(link),
 		pick("Choose a range"),
-		text("00:30-01:20"),
+		text("30"),
+		text("01:20"),
+		pick("Use this clip"),
 		pick("Video"),
 		pick("Best available"),
 		pick("MKV"),
@@ -264,6 +266,10 @@ func TestInteractiveRangeIsValidatedShownAndDownloaded(t *testing.T) {
 
 	session.requireScripted()
 	session.requireDrawn("Time range", "0:30-1:20")
+	session.requireAsked("Start at")
+	session.requireAsked("End at")
+	session.requireAsked("Confirm this clip?")
+	session.requireDrawn("1 / 3", "2 / 3", "3 / 3", "0:50")
 	session.requireArgs("--download-sections", "*0:30-1:20")
 	if trimmer.section != (domain.TimeRange{Start: 30, End: 80}) {
 		t.Fatalf("trimmer section = %#v, want 30-80", trimmer.section)
@@ -274,9 +280,12 @@ func TestInteractiveRangeRetriesInvalidInput(t *testing.T) {
 	session := newSession(t, script(
 		text(link),
 		pick("Choose a range"),
+		text("not a time"),
 		text("00:30"),
-		text("01:30-03:00"),
-		text("00:30-01:20"),
+		text("20"),
+		text("03:00"),
+		text("01:20"),
+		pick("Use this clip"),
 		pick("Video"),
 		pick("Best available"),
 		pick("MKV"),
@@ -286,15 +295,7 @@ func TestInteractiveRangeRetriesInvalidInput(t *testing.T) {
 	session.run()
 
 	session.requireScripted()
-	session.requireDrawn("That time range is not valid", "section end 3:00 exceeds video duration")
-	if len(session.prompter.prefills) != 4 {
-		t.Fatalf("time-range retries recorded %d text prefills, want URL plus three empty range prefills", len(session.prompter.prefills))
-	}
-	for index, initial := range session.prompter.prefills[1:] {
-		if initial != "" {
-			t.Fatalf("range retry %d was prefilled with %q, want empty", index+1, initial)
-		}
-	}
+	session.requireDrawn("Check the time", "section start must be before section end", "section end 3:00 exceeds video duration")
 	if session.downloader.runs != 0 {
 		t.Fatalf("downloader ran %d times after invalid input, want zero", session.downloader.runs)
 	}
@@ -304,13 +305,17 @@ func TestInteractiveRangeCanBeChangedFromReview(t *testing.T) {
 	session := newSession(t, script(
 		text(link),
 		pick("Choose a range"),
-		text("00:30-01:20"),
+		text("00:30"),
+		text("01:20"),
+		pick("Use this clip"),
 		pick("Video"),
 		pick("Best available"),
 		pick("MKV"),
 		pick("Change time range"),
 		pick("Choose a range"),
-		text("00:40-01:10"),
+		text("00:40"),
+		text("01:10"),
+		pick("Use this clip"),
 		pick("Download"),
 		pick("Quit"),
 	))
@@ -338,6 +343,20 @@ func TestInteractiveRangeBackReturnsToTheURL(t *testing.T) {
 	if count := strings.Count(strings.Join(session.prompter.questions, "\n"), "Paste a media URL"); count != 3 {
 		t.Fatalf("URL prompt appeared %d times, want 3 after two range-menu backs", count)
 	}
+}
+
+func TestCancellingRangeEditsKeepsTheConfirmedClip(t *testing.T) {
+	session := newSession(t, script(
+		text(link), pick("Choose a range"), text("30"), text("80"), pick("Use this clip"),
+		pick("Video"), pick("Best available"), pick("MKV"),
+		pick("Change time range"), pick("Choose a range"), text("40"), text("70"),
+		pick("Change end"), text("75"), pick("Cancel changes"),
+		pick("Download"), pick("Quit"),
+	))
+	session.prompter.autoWholeVideo = false
+	session.run()
+	session.requireScripted()
+	session.requireArgs("--download-sections", "*0:30-1:20")
 }
 
 func TestSectionBeyondVideoDurationStopsBeforeDownload(t *testing.T) {

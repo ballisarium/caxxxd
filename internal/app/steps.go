@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"math"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -20,6 +21,9 @@ type stage int
 const (
 	stageLink stage = iota
 	stageRange
+	stageRangeStart
+	stageRangeEnd
+	stageRangeConfirm
 	stageMode
 	stageVideoQuality
 	stageVideoContainer
@@ -40,7 +44,7 @@ func stepOf(current stage) (int, string) {
 	switch current {
 	case stageLink:
 		return 1, stepTitles[0]
-	case stageRange, stageMode:
+	case stageRange, stageRangeStart, stageRangeEnd, stageRangeConfirm, stageMode:
 		return 2, stepTitles[1]
 	case stageReview:
 		return 4, stepTitles[3]
@@ -79,7 +83,7 @@ func (a *App) screen(current stage) {
 // is where a new item is chosen.
 func showsMedia(current stage) bool {
 	switch current {
-	case stageRange, stageMode, stageVideoQuality, stageVideoContainer,
+	case stageRange, stageRangeStart, stageRangeEnd, stageRangeConfirm, stageMode, stageVideoQuality, stageVideoContainer,
 		stageAudioFormat, stageSubtitleTrack, stageManualVideo, stageManualAudio:
 		return true
 	default:
@@ -96,6 +100,12 @@ func (a *App) step(ctx context.Context, current stage) (stage, error) {
 		return a.askLink(ctx)
 	case stageRange:
 		return a.askRange()
+	case stageRangeStart:
+		return a.askRangeStart()
+	case stageRangeEnd:
+		return a.askRangeEnd()
+	case stageRangeConfirm:
+		return a.confirmRange()
 	case stageMode:
 		return a.askMode()
 	case stageVideoQuality:
@@ -309,15 +319,10 @@ func (a *App) askSubtitleTrack() (stage, error) {
 // CLI-provided ranges never enter this stage: they are an explicit choice that
 // has already been parsed before the interface starts.
 func (a *App) askRange() (stage, error) {
-	if a.rangeRetry {
-		a.rangeRetry = false
-		return a.askRangeInput()
-	}
-
 	duration := ui.FormatDuration(a.info.Duration)
 	choices := []Choice{
 		{Label: "Whole video", Detail: "download all " + duration},
-		{Label: "Choose a range", Detail: "download only part of this video"},
+		{Label: "Choose a range", Detail: "set start → set end → confirm your clip"},
 		backChoice,
 	}
 
@@ -331,58 +336,112 @@ func (a *App) askRange() (stage, error) {
 		a.options.Section = nil
 		return a.finishRange(), nil
 	case 1:
-		return a.askRangeInput()
+		a.rangeDraft = domain.TimeRange{}
+		if a.options.Section != nil {
+			a.rangeDraft = *a.options.Section
+		}
+		return stageRangeStart, nil
 	default:
 		return a.backFromRange(), nil
 	}
 }
 
-func (a *App) askRangeInput() (stage, error) {
-	duration := ui.FormatDuration(a.info.Duration)
+func (a *App) askRangeStart() (stage, error) {
+	a.console.Accent("1 / 3  ·  Where should the clip start?")
 	initial := ""
-	if a.options.Section != nil {
-		initial = a.options.Section.String()
+	if a.rangeDraft.Start > 0 {
+		initial = ui.FormatDuration(float64(a.rangeDraft.Start))
 	}
 	typed, err := a.prompt.Text(
-		"Time range",
-		"Use SS, MM:SS, or HH:MM:SS. Video duration: "+duration+".",
+		"Start at",
+		"Seconds: 90 · Timecode: 1:30 or 0:01:30 · Beginning: 0",
 		initial,
 	)
 	if err != nil {
-		return stageRange, err
+		return stageRangeStart, err
 	}
-
-	section, parseErr := domain.ParseTimeRange(strings.TrimSpace(typed))
+	start, parseErr := domain.ParseTimecode(typed)
 	if parseErr != nil {
-		return a.rangeError(parseErr), nil
+		return a.rangeError(parseErr, stageRangeStart), nil
 	}
-	if durationErr := section.ValidateDuration(a.info.Duration); durationErr != nil {
-		return a.rangeError(durationErr), nil
+	if a.info.Duration <= 0 || math.IsNaN(a.info.Duration) || math.IsInf(a.info.Duration, 0) {
+		return a.rangeError(fmt.Errorf("video duration is unavailable; choose Whole video instead"), stageRange), nil
 	}
-
-	a.options.Section = &section
-	return a.finishRange(), nil
+	if float64(start) >= a.info.Duration {
+		return a.rangeError(fmt.Errorf("start must be before the video ends at %s", ui.FormatDuration(a.info.Duration)), stageRangeStart), nil
+	}
+	a.rangeDraft.Start = start
+	return stageRangeEnd, nil
 }
 
-func (a *App) rangeError(err error) stage {
-	a.rangeRetry = true
-	a.carry(
-		"That time range is not valid",
-		err.Error(),
-		"Use START-END, for example 00:30-01:20.",
-	)
-	return stageRange
+func (a *App) askRangeEnd() (stage, error) {
+	a.console.Accent("2 / 3  ·  Where should the clip end?")
+	a.console.Text("Starts at " + ui.FormatDuration(float64(a.rangeDraft.Start)) + " · video ends at " + ui.FormatDuration(a.info.Duration))
+	initial := ""
+	if a.rangeDraft.End > a.rangeDraft.Start {
+		initial = ui.FormatDuration(float64(a.rangeDraft.End))
+	}
+	typed, err := a.prompt.Text("End at", "Use a position in the video, not a duration: 120 or 2:00.", initial)
+	if err != nil {
+		return stageRangeEnd, err
+	}
+	end, parseErr := domain.ParseTimecode(typed)
+	if parseErr != nil {
+		return a.rangeError(parseErr, stageRangeEnd), nil
+	}
+	draft := domain.TimeRange{Start: a.rangeDraft.Start, End: end}
+	if err := draft.ValidateDuration(a.info.Duration); err != nil {
+		return a.rangeError(err, stageRangeEnd), nil
+	}
+	a.rangeDraft = draft
+	return stageRangeConfirm, nil
+}
+
+func (a *App) confirmRange() (stage, error) {
+	a.console.Accent("3 / 3  ·  Check your clip")
+	a.console.Panel("Your clip", a.console.Fields([]ui.Field{
+		{Label: "From", Value: ui.FormatDuration(float64(a.rangeDraft.Start))},
+		{Label: "To", Value: ui.FormatDuration(float64(a.rangeDraft.End))},
+		{Label: "Clip length", Value: ui.FormatDuration(float64(a.rangeDraft.End - a.rangeDraft.Start))},
+	})...)
+	picked, err := a.prompt.Choose("Confirm this clip?", []Choice{
+		{Label: "Use this clip", Detail: "continue with these start and end times"},
+		{Label: "Change start", Detail: "choose a different beginning"},
+		{Label: "Change end", Detail: "choose a different ending"},
+		{Label: "Cancel changes", Detail: "keep the previous selection"},
+	}, 0)
+	if err != nil {
+		return stageRangeConfirm, err
+	}
+	switch picked {
+	case 0:
+		section := a.rangeDraft
+		a.options.Section = &section
+		return a.finishRange(), nil
+	case 1:
+		return stageRangeStart, nil
+	case 2:
+		return stageRangeEnd, nil
+	default:
+		if a.rangeReturn == stageReview {
+			return a.backFromRange(), nil
+		}
+		return stageRange, nil
+	}
+}
+
+func (a *App) rangeError(err error, retry stage) stage {
+	a.carry("Check the time", err.Error())
+	return retry
 }
 
 func (a *App) finishRange() stage {
-	a.rangeRetry = false
 	next := a.rangeReturn
 	a.rangeReturn = stageMode
 	return next
 }
 
 func (a *App) backFromRange() stage {
-	a.rangeRetry = false
 	next := a.rangeReturn
 	a.rangeReturn = stageMode
 	if next == stageReview {

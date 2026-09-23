@@ -97,7 +97,7 @@ type App struct {
 
 	sectionFixed bool
 	rangeReturn  stage
-	rangeRetry   bool
+	rangeDraft   domain.TimeRange
 
 	mode        domain.MediaMode
 	maxHeight   int

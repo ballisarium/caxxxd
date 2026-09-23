@@ -27,11 +27,11 @@ func ParseTimeRange(input string) (TimeRange, error) {
 		return TimeRange{}, errors.New("expected START-END, for example 05:30-06:20")
 	}
 
-	start, err := parseTimecode(parts[0])
+	start, err := ParseTimecode(parts[0])
 	if err != nil {
 		return TimeRange{}, fmt.Errorf("invalid start time: %w", err)
 	}
-	end, err := parseTimecode(parts[1])
+	end, err := ParseTimecode(parts[1])
 	if err != nil {
 		return TimeRange{}, fmt.Errorf("invalid end time: %w", err)
 	}
@@ -80,7 +80,8 @@ func (r TimeRange) String() string {
 	return formatTimecode(r.Start) + "-" + formatTimecode(r.End)
 }
 
-func parseTimecode(input string) (int64, error) {
+// ParseTimecode accepts whole seconds, MM:SS, or HH:MM:SS.
+func ParseTimecode(input string) (int64, error) {
 	value := strings.TrimSpace(input)
 	if value == "" {
 		return 0, errors.New("timestamp is empty")
