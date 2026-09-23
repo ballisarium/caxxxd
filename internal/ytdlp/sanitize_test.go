@@ -6,6 +6,15 @@ import (
 	"testing"
 )
 
+func TestDiagnosticsHideURLs(t *testing.T) {
+	events := make(chan RunEvent, 1)
+	w := lineWriter{events: events}
+	w.emit("ERROR: HTTP 403 https://example.test/media?signature=synthetic-value")
+	if got := (<-events).Log; got != "ERROR: HTTP 403 [URL hidden]" {
+		t.Fatal("diagnostic exposed a URL")
+	}
+}
+
 func TestSanitizeRemovesWhatATerminalWouldActOn(t *testing.T) {
 	tests := []struct {
 		name string

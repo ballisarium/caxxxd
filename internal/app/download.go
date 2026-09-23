@@ -490,6 +490,7 @@ type recovery struct {
 // output is kept behind a choice: it is the second question someone asks, not
 // the first.
 func (a *App) reportFailure(failure Failure, ways ...recovery) (stage, error) {
+	failure.Detail = ytdlp.SafeDiagnostic(failure.Detail)
 	category := failure.Category
 	if category == FailureNone {
 		category = FailureTool

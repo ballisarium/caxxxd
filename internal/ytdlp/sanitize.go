@@ -5,6 +5,18 @@ import (
 	"strings"
 )
 
+var diagnosticURL = regexp.MustCompile(`(?i)https?://[^\s<>]+`)
+
+// SafeDiagnostic strips terminal controls and URLs, which can contain signed
+// media credentials. Keep line boundaries for readable error details.
+func SafeDiagnostic(text string) string {
+	lines := strings.Split(text, "\n")
+	for i, line := range lines {
+		lines[i] = diagnosticURL.ReplaceAllString(sanitize(line), "[URL hidden]")
+	}
+	return strings.TrimSpace(strings.Join(lines, "\n"))
+}
+
 // escapeSequence matches what a terminal acts on rather than shows: an OSC
 // string, a two-byte escape, or a CSI sequence.
 var escapeSequence = regexp.MustCompile(

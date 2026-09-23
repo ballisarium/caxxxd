@@ -154,7 +154,7 @@ func (w *lineWriter) emit(line string) {
 	}
 	// A diagnostic line is the one thing here written to be read by a person,
 	// which is exactly why it must not be able to redraw the screen it lands on.
-	if trimmed := sanitize(line); trimmed != "" {
+	if trimmed := SafeDiagnostic(line); trimmed != "" {
 		w.events <- RunEvent{Log: trimmed}
 	}
 }
