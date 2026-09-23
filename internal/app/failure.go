@@ -61,6 +61,9 @@ func classifyMetadataError(err error) Failure {
 	if err == nil {
 		return Failure{}
 	}
+	if errors.Is(err, context.Canceled) {
+		return Failure{Category: FailureCancelled, NextStep: "The metadata lookup was cancelled."}
+	}
 
 	detail := err.Error()
 	var exitErr *exec.ExitError

@@ -1,9 +1,16 @@
 package app
 
 import (
+	"context"
 	"errors"
 	"testing"
 )
+
+func TestMetadataCancellationIsNotAToolFailure(t *testing.T) {
+	if failure := classifyMetadataError(context.Canceled); failure.Category != FailureCancelled {
+		t.Fatalf("cancellation category = %s", failure.Category)
+	}
+}
 
 func TestCookieSuccessDoesNotHideDownloadFailure(t *testing.T) {
 	failure := classifyDownloadError(errors.New("exit status 1"), []string{

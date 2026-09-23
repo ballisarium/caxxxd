@@ -8,6 +8,8 @@ import (
 	"net/url"
 	"os/exec"
 	"sort"
+
+	"github.com/ballisarium/caxxxd/internal/process"
 )
 
 // ErrNoFormats means yt-dlp understood the page but offered nothing to download.
@@ -24,7 +26,21 @@ type ExecOutputRunner struct{}
 
 // Output implements OutputRunner.
 func (ExecOutputRunner) Output(ctx context.Context, name string, args ...string) ([]byte, error) {
-	return exec.CommandContext(ctx, name, args...).Output()
+	cmd := exec.CommandContext(ctx, name, args...)
+	process.ConfigureGroup(cmd)
+	finished := make(chan struct{})
+	cmd.Cancel = func() error {
+		err := process.TerminateGroup(cmd)
+		go escalate(cmd, finished)
+		return err
+	}
+	cmd.WaitDelay = waitGrace
+	payload, err := cmd.Output()
+	close(finished)
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+	return payload, err
 }
 
 // Client fetches metadata for a single media item.

@@ -21,6 +21,20 @@ func fakeBinary(t *testing.T, body string) string {
 	return path
 }
 
+func TestMetadataCancellationStopsHelpersPromptly(t *testing.T) {
+	binary := fakeBinary(t, "#!/bin/sh\nsleep 3 &\nwait\n")
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	_, err := (ytdlp.ExecOutputRunner{}).Output(ctx, binary)
+	if elapsed := time.Since(start); elapsed > 2*time.Second {
+		t.Errorf("metadata cancellation waited for a child: %s", elapsed)
+	}
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("cancellation returned %v, want context deadline", err)
+	}
+}
+
 // drain collects every event until the channel closes.
 func drain(t *testing.T, events <-chan ytdlp.RunEvent, timeout time.Duration) []ytdlp.RunEvent {
 	t.Helper()
