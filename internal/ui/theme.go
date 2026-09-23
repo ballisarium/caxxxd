@@ -16,11 +16,11 @@ import (
 // neutral or one of the three states a step can end in.
 const (
 	HexKlein = "#002FA7" // International Klein Blue: the primary accent
-	HexLift  = "#1E4FD0" // Klein raised: borders and rules
+	HexLift  = "#4775E6" // Klein raised: borders and rules
 	HexGlow  = "#5B87FF" // Klein as accent text
 	HexMist  = "#A9BEFF" // Klein as labels and secondary text
 	HexInk   = "#F4F7FF" // primary text, and text on top of Klein
-	HexSlate = "#7C88A6" // hints and help
+	HexSlate = "#A2ACC2" // hints and help
 
 	HexSuccess = "#3DD68C"
 	HexWarning = "#FFC66D"

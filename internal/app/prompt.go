@@ -107,6 +107,7 @@ func (p TerminalPrompter) Choose(question string, choices []Choice, initial int)
 	// The selector's look is set field by field: pterm exposes builders for
 	// the menu's behaviour but not for its styling.
 	interrupted := false
+	p.console.Hint("↑ / ↓  Move   Enter  Select   Ctrl+C  Quit")
 	menu := pterm.DefaultInteractiveSelect
 	menu.Options = labels
 	menu.DefaultOption = labels[initial]
@@ -114,8 +115,8 @@ func (p TerminalPrompter) Choose(question string, choices []Choice, initial int)
 	menu.Filter = filterable(len(labels))
 	menu.TextStyle = pterm.NewStyle()
 	menu.OptionStyle = pterm.NewStyle()
-	menu.SelectorStyle = pterm.NewStyle(pterm.FgLightBlue, pterm.Bold)
-	menu.Selector = "▸"
+	menu.SelectorStyle = pterm.NewStyle(pterm.Bold)
+	menu.Selector = p.console.Theme().OnKlein.Sprint("▶")
 	menu.OnInterruptFunc = func() { interrupted = true }
 
 	selected, err := menu.Show(p.ask(question))
@@ -154,7 +155,7 @@ func menuQuestionText(question string) string {
 
 // askLine is the prompt a line editor draws, delimiter and all.
 func (p TerminalPrompter) askLine(question string) string {
-	return p.console.Theme().Glow.Sprint("▸ ") + p.console.Theme().Ink.Sprint(question+": ")
+	return p.console.Theme().OnKlein.Sprint("▶") + " " + p.console.Theme().Ink.Sprint(question+": ")
 }
 
 // menuLabels lays the choices out as aligned rows, none wider than room.
