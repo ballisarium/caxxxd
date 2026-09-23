@@ -266,6 +266,9 @@ the flow behaves the same on an English, Cyrillic, or Greek keyboard layout.
 video is never transcoded by `caxxxd`. it asks `yt-dlp` for the best streams it
 can find and lets `ffmpeg` merge or remux them.
 
+The selected container also applies when the source already combines video
+and audio: caxxxd remuxes that file without re-encoding its streams.
+
 | container | default behavior |
 | --- | --- |
 | MKV | best video and best audio, whatever codecs the site offers |

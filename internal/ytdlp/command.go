@@ -141,7 +141,7 @@ func buildVideoArgs(request DownloadRequest) ([]string, error) {
 		if err != nil {
 			return nil, err
 		}
-		return append(args, "--merge-output-format", container), nil
+		return append(args, "--merge-output-format", container, "--remux-video", container), nil
 	}
 
 	container := request.Container
@@ -156,6 +156,8 @@ func buildVideoArgs(request DownloadRequest) ([]string, error) {
 	return []string{
 		"-f", presetVideoSelector(container, request.MaxHeight),
 		"--merge-output-format", name,
+		// The merge option alone does nothing for an already combined stream.
+		"--remux-video", name,
 	}, nil
 }
 

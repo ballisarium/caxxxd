@@ -21,6 +21,7 @@ func TestBuildBestVideoMKV(t *testing.T) {
 	}
 	assertContainsSequence(t, args, "-f", "bv*+ba/b")
 	assertContainsSequence(t, args, "--merge-output-format", "mkv")
+	assertContainsSequence(t, args, "--remux-video", "mkv")
 	assertContainsSequence(t, args, "-P", "/tmp/out")
 }
 
@@ -243,6 +244,7 @@ func TestBuildManualSplitHonoursExplicitContainer(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertContainsSequence(t, args, "--merge-output-format", "mkv")
+	assertContainsSequence(t, args, "--remux-video", "mkv")
 }
 
 func TestBuildRejectsIncompleteManualSelection(t *testing.T) {
