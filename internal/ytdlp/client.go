@@ -29,8 +29,9 @@ func (ExecOutputRunner) Output(ctx context.Context, name string, args ...string)
 
 // Client fetches metadata for a single media item.
 type Client struct {
-	Binary string
-	Runner OutputRunner
+	Binary        string
+	Runner        OutputRunner
+	CookieBrowser string
 }
 
 // NewClient returns a Client that shells out to the given yt-dlp binary.
@@ -45,7 +46,11 @@ func (c Client) Fetch(ctx context.Context, rawURL string) (MediaInfo, error) {
 		return MediaInfo{}, errors.New("invalid URL")
 	}
 
-	payload, err := c.Runner.Output(ctx, c.Binary,
+	args, err := CookieArgs(c.CookieBrowser)
+	if err != nil {
+		return MediaInfo{}, err
+	}
+	args = append(args,
 		"--dump-single-json",
 		"--no-warnings",
 		"--no-playlist",
@@ -53,6 +58,7 @@ func (c Client) Fetch(ctx context.Context, rawURL string) (MediaInfo, error) {
 		"--write-auto-subs",
 		rawURL,
 	)
+	payload, err := c.Runner.Output(ctx, c.Binary, args...)
 	if err != nil {
 		return MediaInfo{}, fmt.Errorf("fetch metadata: %w", err)
 	}

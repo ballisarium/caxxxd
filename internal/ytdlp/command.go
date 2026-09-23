@@ -20,6 +20,7 @@ const (
 // DownloadRequest is a fully resolved download: what to fetch, how, and where.
 // Manual selections take precedence over the preset fields.
 type DownloadRequest struct {
+	CookieBrowser     string
 	URL               string
 	Mode              domain.MediaMode
 	MaxHeight         int
@@ -60,18 +61,22 @@ func BuildCommand(request DownloadRequest) ([]string, error) {
 		outputTemplate = "%(title)s [%(id)s] [%(section_start)s-%(section_end)s].%(ext)s"
 	}
 
-	args := []string{
+	args, err := CookieArgs(request.CookieBrowser)
+	if err != nil {
+		return nil, err
+	}
+	args = append(args,
 		"--no-playlist",
 		"--newline",
 		"--progress",
 		"--progress-delta", "0.2",
 		"--output-na-placeholder", "NA",
-		"--progress-template", "download:" + progressMarker + "%(progress.status)s\t%(progress.downloaded_bytes)s\t%(progress.total_bytes)s\t%(progress.total_bytes_estimate)s\t%(progress.speed)s\t%(progress.eta)s",
-		"--progress-template", "postprocess:" + postProcessMarker + "%(progress.status)s",
-		"--print", "after_move:" + fileMarker + "%(filepath)s",
+		"--progress-template", "download:"+progressMarker+"%(progress.status)s\t%(progress.downloaded_bytes)s\t%(progress.total_bytes)s\t%(progress.total_bytes_estimate)s\t%(progress.speed)s\t%(progress.eta)s",
+		"--progress-template", "postprocess:"+postProcessMarker+"%(progress.status)s",
+		"--print", "after_move:"+fileMarker+"%(filepath)s",
 		"-P", request.OutputDir,
 		"-o", outputTemplate,
-	}
+	)
 	if sectionDownload {
 		args = append(args, "--download-sections", request.Section.Selector())
 	}

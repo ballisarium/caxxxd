@@ -54,6 +54,7 @@ type TranscriptConverter interface {
 // Options carries the flow's dependencies. Anything left zero-valued is filled
 // in with the real implementation, so tests inject only what they care about.
 type Options struct {
+	ConfigureCookies    bool
 	InitialURL          string
 	Section             *domain.TimeRange
 	Version             string
@@ -233,6 +234,15 @@ func (a *App) Run(ctx context.Context) error {
 	})
 
 	a.loadPreferences()
+	if a.options.ConfigureCookies {
+		a.screen(stageLink)
+		if err := a.configureCookies(); err != nil {
+			if errors.Is(err, ErrInterrupted) {
+				return a.leave()
+			}
+			return err
+		}
+	}
 
 	if err := a.checkDependencies(ctx); err != nil {
 		if errors.Is(err, errQuit) {
@@ -286,6 +296,11 @@ func (a *App) loadPreferences() {
 	}
 
 	a.preferences = loaded
+	if _, err := ytdlp.CookieArgs(loaded.CookieBrowser); err != nil {
+		a.preferences.CookieBrowser = ""
+		a.carry("Browser cookies disabled", "The saved browser is unsupported. Run caxxxd --cookies to choose one.")
+	}
+	a.options.Client.CookieBrowser = a.preferences.CookieBrowser
 	a.outputDir = loaded.OutputDir
 	a.container = loaded.VideoContainer
 	a.audioFormat = loaded.AudioFormat
@@ -387,10 +402,11 @@ func toolMark(name string, dependency deps.Dependency) string {
 // request builds the download request described by the current selection.
 func (a *App) request() ytdlp.DownloadRequest {
 	request := ytdlp.DownloadRequest{
-		URL:       a.url,
-		Mode:      a.mode,
-		OutputDir: a.outputDir,
-		Section:   a.options.Section,
+		CookieBrowser: a.preferences.CookieBrowser,
+		URL:           a.url,
+		Mode:          a.mode,
+		OutputDir:     a.outputDir,
+		Section:       a.options.Section,
 	}
 
 	switch a.mode {

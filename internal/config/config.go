@@ -17,6 +17,7 @@ import (
 
 // Config is the persisted preference set.
 type Config struct {
+	CookieBrowser  string                `json:"cookie_browser,omitempty"`
 	OutputDir      string                `json:"output_dir"`
 	VideoContainer domain.VideoContainer `json:"video_container"`
 	AudioFormat    domain.AudioFormat    `json:"audio_format"`

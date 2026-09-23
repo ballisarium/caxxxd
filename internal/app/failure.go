@@ -20,6 +20,7 @@ const (
 	FailureNoFormats       FailureCategory = "No downloadable formats"
 	FailureNetwork         FailureCategory = "Network or site error"
 	FailureTool            FailureCategory = "yt-dlp failed"
+	FailureCookies         FailureCategory = "Browser cookies unavailable"
 	FailureOutputDirectory FailureCategory = "Output directory error"
 	FailureCancelled       FailureCategory = "Download cancelled"
 	FailureProcessing      FailureCategory = "Clipping failed"
@@ -69,6 +70,10 @@ func classifyMetadataError(err error) Failure {
 	haystack := strings.ToLower(detail)
 
 	switch {
+	case cookieProblem(haystack):
+		return cookieFailure(detail)
+	case containsAny(haystack, "403 forbidden", "http error 403", "sign in to confirm"):
+		return accessFailure(detail)
 	case errors.Is(err, ytdlp.ErrNoFormats):
 		return Failure{
 			Category: FailureNoFormats,
@@ -136,6 +141,10 @@ func classifyDownloadError(err error, logs []string) Failure {
 
 	haystack := strings.ToLower(detail)
 	switch {
+	case cookieProblem(haystack):
+		return cookieFailure(detail)
+	case containsAny(haystack, "403 forbidden", "http error 403", "sign in to confirm"):
+		return accessFailure(detail)
 	case containsAny(haystack, "video unavailable", "private video", "members-only", "has been removed", "sign in to confirm", "drm"):
 		return Failure{
 			Category: FailureUnavailable,
@@ -167,6 +176,31 @@ func classifyDownloadError(err error, logs []string) Failure {
 			Detail:   detail,
 		}
 	}
+}
+
+func cookieFailure(detail string) Failure {
+	return Failure{Category: FailureCookies,
+		NextStep: "Check macOS browser-data and Keychain permissions, or choose another signed-in browser with caxxxd --cookies.",
+		Detail:   detail}
+}
+
+func cookieProblem(detail string) bool {
+	for _, line := range strings.Split(detail, "\n") {
+		if containsAny(line, "cookie", "keychain") && containsAny(line, "error", "failed", "could not", "permission denied") {
+			return true
+		}
+	}
+	return false
+}
+
+func accessFailure(detail string) Failure {
+	category := FailureNetwork
+	if strings.Contains(strings.ToLower(detail), "sign in to confirm") {
+		category = FailureUnavailable
+	}
+	return Failure{Category: category,
+		NextStep: "The site refused access. Update yt-dlp (brew upgrade yt-dlp), or enable your signed-in browser with caxxxd --cookies and try again.",
+		Detail:   detail}
 }
 
 func classifyProcessingError(err error) Failure {

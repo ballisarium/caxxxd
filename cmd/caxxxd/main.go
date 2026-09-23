@@ -23,10 +23,11 @@ var version = "dev"
 const usage = `caxxxd — a friendly yt-dlp terminal interface
 
 Usage:
-  caxxxd [--section START-END] [URL]
+  caxxxd [--cookies] [--section START-END] [URL]
   caxxxd --version
 
 Options:
+  --cookies            choose or disable remembered local browser cookies
   --section START-END  download only a time range (SS, MM:SS, or HH:MM:SS)
 
 Required tools:
@@ -38,7 +39,7 @@ Required tools:
 var errTooManyURLs = errors.New("caxxxd downloads one item at a time")
 
 func main() {
-	initialURL, section, done, err := parseArgs(os.Args[1:], os.Stdout, os.Stderr)
+	initialURL, section, cookies, done, err := parseArgs(os.Args[1:], os.Stdout, os.Stderr)
 	if err != nil {
 		os.Exit(2)
 	}
@@ -46,7 +47,7 @@ func main() {
 		return
 	}
 
-	err = run(initialURL, section)
+	err = run(initialURL, section, cookies)
 	switch {
 	case errors.Is(err, app.ErrDependenciesMissing):
 		// The missing tools have already been named on screen.
@@ -59,7 +60,7 @@ func main() {
 
 // parseArgs reads the supported flags. done reports that the work is finished
 // without starting the interface, as with --help and --version.
-func parseArgs(args []string, stdout, stderr io.Writer) (initialURL string, section *domain.TimeRange, done bool, err error) {
+func parseArgs(args []string, stdout, stderr io.Writer) (initialURL string, section *domain.TimeRange, cookies, done bool, err error) {
 	flags := flag.NewFlagSet("caxxxd", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	// Usage is printed explicitly below so --help can go to stdout while a
@@ -68,19 +69,20 @@ func parseArgs(args []string, stdout, stderr io.Writer) (initialURL string, sect
 
 	showVersion := flags.Bool("version", false, "print the version and exit")
 	sectionValue := flags.String("section", "", "download only a time range")
+	flags.BoolVar(&cookies, "cookies", false, "configure local browser cookies")
 
 	if err := flags.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			fmt.Fprint(stdout, usage)
-			return "", nil, true, nil
+			return "", nil, false, true, nil
 		}
 		fmt.Fprint(stderr, "\n"+usage)
-		return "", nil, true, err
+		return "", nil, false, true, err
 	}
 
 	if *showVersion {
 		fmt.Fprintf(stdout, "caxxxd %s\n", version)
-		return "", nil, true, nil
+		return "", nil, false, true, nil
 	}
 
 	if *sectionValue != "" {
@@ -88,37 +90,38 @@ func parseArgs(args []string, stdout, stderr io.Writer) (initialURL string, sect
 		if parseErr != nil {
 			err = fmt.Errorf("invalid --section %q: %w", *sectionValue, parseErr)
 			fmt.Fprintf(stderr, "caxxxd: %v\n\n%s", err, usage)
-			return "", nil, true, err
+			return "", nil, false, true, err
 		}
 		section = &parsed
 	}
 
 	switch flags.NArg() {
 	case 0:
-		return "", section, false, nil
+		return "", section, cookies, false, nil
 	case 1:
-		return flags.Arg(0), section, false, nil
+		return flags.Arg(0), section, cookies, false, nil
 	default:
 		fmt.Fprintf(stderr, "caxxxd: %v\n\n%s", errTooManyURLs, usage)
-		return "", nil, true, errTooManyURLs
+		return "", nil, false, true, errTooManyURLs
 	}
 }
 
 // run builds the real services and starts the interface.
-func run(initialURL string, section *domain.TimeRange) error {
+func run(initialURL string, section *domain.TimeRange, cookies bool) error {
 	ui.MatchOutput(os.Stdout)
 	console := ui.NewConsole(os.Stdout)
 	defer console.Restore()
 
 	session := app.New(app.Options{
-		InitialURL:  initialURL,
-		Section:     section,
-		Version:     version,
-		Checker:     deps.NewChecker(),
-		Client:      ytdlp.NewClient("yt-dlp"),
-		Downloader:  ytdlp.Downloader{Binary: "yt-dlp"},
-		ConfigStore: config.NewStore(configPath()),
-		Console:     console,
+		ConfigureCookies: cookies,
+		InitialURL:       initialURL,
+		Section:          section,
+		Version:          version,
+		Checker:          deps.NewChecker(),
+		Client:           ytdlp.NewClient("yt-dlp"),
+		Downloader:       ytdlp.Downloader{Binary: "yt-dlp"},
+		ConfigStore:      config.NewStore(configPath()),
+		Console:          console,
 	})
 
 	return session.Run(context.Background())

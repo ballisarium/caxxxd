@@ -122,6 +122,11 @@ func (a *App) step(ctx context.Context, current stage) (stage, error) {
 // askLink takes a URL and turns it into media the rest of the flow can talk
 // about. It is also where a failed lookup comes back to.
 func (a *App) askLink(ctx context.Context) (stage, error) {
+	browser := a.preferences.CookieBrowser
+	if browser == "" {
+		browser = "off"
+	}
+	a.console.Hint("Browser cookies: " + browser + " · configure with caxxxd --cookies")
 	// A URL from the command line is offered as a prefilled answer, and so is
 	// the one already loaded: coming back to this step to fix a typo should
 	// not mean typing the whole link again.

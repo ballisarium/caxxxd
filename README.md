@@ -67,6 +67,27 @@ version. if a feature is not right for you, delete it or make a better one.
 
 ## how it works
 
+### local browser cookies
+
+Run `caxxxd --cookies` to enable or disable cookies using an arrow-key menu.
+Choose the browser where you are already signed in, then paste the media URL.
+The choice is remembered for future runs; choose **Off** to stop using it.
+Safari, Chrome, Firefox, Brave, Edge, Chromium, Opera, and Vivaldi are supported.
+
+Cookies are off by default. yt-dlp reads them locally on each metadata lookup
+and download, including subtitles. caxxxd stores only the browser name in its
+private preferences; it does not export cookies to a file. macOS may request
+Keychain access or permission to read browser data. If access fails, check
+those permissions or choose another signed-in browser. No anonymous retry is
+performed silently.
+
+caxxxd ignores global yt-dlp configuration so external cookie, output, or
+playlist options cannot override this flow. A signed-in session may help with
+account restrictions, but does not guarantee that a site will accept a request.
+For HTTP 403 errors, update yt-dlp (`brew upgrade yt-dlp`) and try again.
+
+### process integration
+
 `caxxxd` keeps the boundary with the external tools intentionally boring:
 
   * `yt-dlp --dump-single-json` provides metadata, formats, and subtitle tracks

@@ -92,6 +92,25 @@ func TestFetchPassesStructuredFlags(t *testing.T) {
 	}
 }
 
+func TestBrowserCookiesReachMetadataAndDownload(t *testing.T) {
+	runner := &fakeRunner{payload: fixture(t, "video.json")}
+	client := ytdlp.Client{Binary: "yt-dlp", Runner: runner, CookieBrowser: "firefox"}
+	if _, err := client.Fetch(context.Background(), "https://example.test/video"); err != nil {
+		t.Fatal(err)
+	}
+	assertContainsSequence(t, runner.args, "--ignore-config")
+	assertContainsSequence(t, runner.args, "--cookies-from-browser", "firefox")
+	args, err := ytdlp.BuildCommand(ytdlp.DownloadRequest{
+		URL: "https://example.test/video", OutputDir: t.TempDir(),
+		Mode: "audio", AudioFormat: "source", CookieBrowser: "firefox",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertContainsSequence(t, args, "--ignore-config")
+	assertContainsSequence(t, args, "--cookies-from-browser", "firefox")
+}
+
 func TestFetchHandlesAudioOnlySources(t *testing.T) {
 	client := ytdlp.Client{Binary: "yt-dlp", Runner: &fakeRunner{payload: fixture(t, "audio_only.json")}}
 

@@ -9,7 +9,7 @@ import (
 func TestParseArgsWithoutArguments(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 
-	initialURL, section, done, err := parseArgs(nil, &stdout, &stderr)
+	initialURL, section, _, done, err := parseArgs(nil, &stdout, &stderr)
 	if err != nil || done {
 		t.Fatalf("parseArgs = (%q, %#v, %t, %v), want a normal start", initialURL, section, done, err)
 	}
@@ -21,10 +21,18 @@ func TestParseArgsWithoutArguments(t *testing.T) {
 	}
 }
 
+func TestParseArgsOpensCookieSettings(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	url, _, cookies, done, err := parseArgs([]string{"--cookies", "https://example.test/video"}, &stdout, &stderr)
+	if err != nil || done || !cookies || url != "https://example.test/video" {
+		t.Fatal("--cookies must open settings before the supplied URL")
+	}
+}
+
 func TestParseArgsAcceptsOneURL(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 
-	initialURL, section, done, err := parseArgs([]string{"https://example.test/video"}, &stdout, &stderr)
+	initialURL, section, _, done, err := parseArgs([]string{"https://example.test/video"}, &stdout, &stderr)
 	if err != nil || done {
 		t.Fatalf("parseArgs = (%q, %#v, %t, %v)", initialURL, section, done, err)
 	}
@@ -39,7 +47,7 @@ func TestParseArgsAcceptsOneURL(t *testing.T) {
 func TestParseArgsAcceptsSectionAndURL(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 
-	initialURL, section, done, err := parseArgs([]string{
+	initialURL, section, _, done, err := parseArgs([]string{
 		"--section", "05:30-06:20", "https://example.test/video",
 	}, &stdout, &stderr)
 	if err != nil || done {
@@ -56,7 +64,7 @@ func TestParseArgsAcceptsSectionAndURL(t *testing.T) {
 func TestParseArgsRejectsInvalidSectionBeforeStarting(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 
-	_, _, done, err := parseArgs([]string{"--section", "06:20-05:30"}, &stdout, &stderr)
+	_, _, _, done, err := parseArgs([]string{"--section", "06:20-05:30"}, &stdout, &stderr)
 	if err == nil || !done {
 		t.Fatalf("invalid section must stop startup: done=%t err=%v", done, err)
 	}
@@ -68,7 +76,7 @@ func TestParseArgsRejectsInvalidSectionBeforeStarting(t *testing.T) {
 func TestParseArgsRejectsMultipleURLs(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 
-	_, _, done, err := parseArgs([]string{"https://a.test/1", "https://b.test/2"}, &stdout, &stderr)
+	_, _, _, done, err := parseArgs([]string{"https://a.test/1", "https://b.test/2"}, &stdout, &stderr)
 	if err == nil {
 		t.Fatal("two URLs must be rejected")
 	}
@@ -83,7 +91,7 @@ func TestParseArgsRejectsMultipleURLs(t *testing.T) {
 func TestParseArgsPrintsVersion(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 
-	_, _, done, err := parseArgs([]string{"--version"}, &stdout, &stderr)
+	_, _, _, done, err := parseArgs([]string{"--version"}, &stdout, &stderr)
 	if err != nil || !done {
 		t.Fatalf("parseArgs = (%t, %v)", done, err)
 	}
@@ -95,7 +103,7 @@ func TestParseArgsPrintsVersion(t *testing.T) {
 func TestParseArgsPrintsHelpOnStdout(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 
-	_, _, done, err := parseArgs([]string{"--help"}, &stdout, &stderr)
+	_, _, _, done, err := parseArgs([]string{"--help"}, &stdout, &stderr)
 	if err != nil {
 		t.Fatalf("--help returned %v, want a clean exit", err)
 	}
@@ -105,7 +113,7 @@ func TestParseArgsPrintsHelpOnStdout(t *testing.T) {
 
 	for _, want := range []string{
 		"caxxxd — a friendly yt-dlp terminal interface",
-		"caxxxd [--section START-END] [URL]",
+		"caxxxd [--cookies] [--section START-END] [URL]",
 		"yt-dlp",
 		"ffmpeg",
 	} {
@@ -118,7 +126,7 @@ func TestParseArgsPrintsHelpOnStdout(t *testing.T) {
 func TestParseArgsReportsUnknownFlags(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 
-	if _, _, done, err := parseArgs([]string{"--nope"}, &stdout, &stderr); err == nil || !done {
+	if _, _, _, done, err := parseArgs([]string{"--nope"}, &stdout, &stderr); err == nil || !done {
 		t.Fatalf("unknown flags must fail: done=%t err=%v", done, err)
 	}
 	if !strings.Contains(stderr.String(), "Usage:") {
