@@ -2,6 +2,7 @@ package ui
 
 import (
 	"bufio"
+	"bytes"
 	"errors"
 	"io"
 	"os"
@@ -42,12 +43,12 @@ func (c *Console) ReadLine(in *os.File, prompt, initial string) (string, error) 
 
 	// Said here rather than by the caller: these keys exist because the editor
 	// below is running, and only while it is.
-	c.Hint("Ctrl+U clears the line, Ctrl+W the word before the cursor.")
+	c.Hint("Ctrl+C quits. Ctrl+U clears the line; Ctrl+W deletes a word.")
 
 	editor := term.NewTerminal(readWriter{
 		// The prefill is fed in ahead of the keyboard, which is what makes it
 		// an editable answer rather than a label the user has to retype.
-		reader: io.MultiReader(strings.NewReader(initial), in),
+		reader: io.MultiReader(strings.NewReader(initial), interruptReader{in}),
 		writer: c.out,
 	}, prompt)
 
@@ -140,3 +141,16 @@ type readWriter struct {
 
 func (rw readWriter) Read(p []byte) (int, error)  { return rw.reader.Read(p) }
 func (rw readWriter) Write(p []byte) (int, error) { return rw.writer.Write(p) }
+
+// interruptReader handles Ctrl+C before an escape or paste decoder can absorb
+// it. Raw mode disables terminal-generated SIGINT, so this is the cancellation
+// boundary for interactive input, including several keys in one read.
+type interruptReader struct{ io.Reader }
+
+func (r interruptReader) Read(p []byte) (int, error) {
+	n, err := r.Reader.Read(p)
+	if bytes.IndexByte(p[:n], '\x03') >= 0 {
+		return 0, io.EOF
+	}
+	return n, err
+}

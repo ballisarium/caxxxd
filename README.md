@@ -113,7 +113,9 @@ and selecting a signed-in browser. cookies cannot guarantee access to every item
 ### controls and output
 
 - `↑` / `↓` select; `Enter` confirms; typing filters long menus.
-- `Ctrl+U` clears a text field; `Ctrl+C` cancels or exits.
+- `Ctrl+U` clears a text field; `Ctrl+C` exits from any prompt or menu,
+  including after Escape or a partial paste. during a download, it cancels
+  the operation and returns to the review screen.
 - video preserves its codecs; MKV is the default. MP4 and WebM may limit quality
   to compatible source streams.
 - audio defaults to the source format; MP3, M4A, Opus, FLAC, and WAV are available.

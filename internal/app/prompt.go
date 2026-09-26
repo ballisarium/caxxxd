@@ -6,8 +6,6 @@ import (
 	"os"
 	"strings"
 
-	"github.com/pterm/pterm"
-
 	"github.com/ballisarium/caxxxd/internal/ui"
 )
 
@@ -57,13 +55,8 @@ const menuHeight = 12
 // cover the wider of the two or that last line wraps.
 const selectorColumns = 4
 
-// TerminalPrompter asks through the terminal: menus with pterm's interactive
-// select, and text with a line editor.
-//
-// The text half is not pterm's. Its input offers no way to clear a line or
-// delete a word, and it places the cursor by a width that counts some of its
-// own escape codes as visible characters, which leaves the cursor sitting a
-// few columns past what was typed.
+// TerminalPrompter asks through the terminal with arrow-key menus and editable
+// text fields. Both restore the terminal before returning an interruption.
 type TerminalPrompter struct {
 	console *ui.Console
 	in      *os.File
@@ -104,45 +97,21 @@ func (p TerminalPrompter) Choose(question string, choices []Choice, initial int)
 		initial = 0
 	}
 
-	// The selector's look is set field by field: pterm exposes builders for
-	// the menu's behaviour but not for its styling.
-	interrupted := false
 	p.console.Hint("↑ / ↓  Move   Enter  Select   Ctrl+C  Quit")
-	menu := pterm.DefaultInteractiveSelect
-	menu.Options = labels
-	menu.DefaultOption = labels[initial]
-	menu.MaxHeight = min(len(labels), menuHeight)
-	menu.Filter = filterable(len(labels))
-	menu.TextStyle = pterm.NewStyle()
-	menu.OptionStyle = pterm.NewStyle()
-	menu.SelectorStyle = pterm.NewStyle(pterm.Bold)
-	menu.Selector = p.console.Theme().OnKlein.Sprint("▶")
-	menu.OnInterruptFunc = func() { interrupted = true }
-
-	selected, err := menu.Show(p.ask(question))
+	selected, err := p.console.Select(p.in, p.ask(question), labels, initial, menuHeight, filterable(len(labels)))
 	p.console.Blank()
-
-	switch {
-	case err != nil:
-		return 0, err
-	case interrupted:
+	if errors.Is(err, io.EOF) {
 		return 0, ErrInterrupted
 	}
-
-	for index, label := range labels {
-		if label == selected {
-			return index, nil
-		}
-	}
-	return 0, errNoSuchChoice
+	return selected, err
 }
 
-// ask styles a question for pterm's interactive menu. The menu adds its own
+// ask styles a question for the interactive menu. The menu adds its own
 // delimiter after the text; the line editor is handed the whole prompt and
 // needs one written in.
 func (p TerminalPrompter) ask(question string) string {
 	parts := strings.SplitN(menuQuestionText(question), "\n", 2)
-	// pterm appends its delimiter after the full prompt text. Keeping the rule
+	// The menu appends its delimiter after the full prompt text. Keeping the rule
 	// above the question leaves that delimiter attached to the question rather
 	// than drawing it onto the separator.
 	return p.console.Theme().Lift.Sprint(parts[0]) + "\n" + p.console.Theme().Glow.Sprint(parts[1])
@@ -161,12 +130,12 @@ func (p TerminalPrompter) askLine(question string) string {
 // menuLabels lays the choices out as aligned rows, none wider than room.
 //
 // A row that does not fit wraps, and a wrapped row breaks the menu rather than
-// merely looking untidy: pterm redraws by counting newlines, not by asking
+// merely looking untidy: the menu redraws by counting newlines, not by asking
 // where the terminal folded a line, so the overflow stays on screen as the
 // selection moves. The detail is the half that gets shortened, because the
 // label is what is being chosen.
 //
-// The rows stay free of colour on purpose: pterm matches the type-to-search
+// The rows stay free of colour on purpose: the menu matches the type-to-search
 // filter against these exact strings, and escape sequences inside them would
 // make a search for "1080" miss the row that shows it.
 func menuLabels(choices []Choice, room int) []string {
@@ -193,8 +162,8 @@ func menuLabels(choices []Choice, room int) []string {
 		}
 		row = ui.Truncate(row, room)
 
-		// pterm identifies a choice by its text, so two identical rows would
-		// be the same option. Trailing space is invisible and breaks the tie.
+		// Keep displayed labels distinct even when truncation makes two options
+		// look identical. The selection itself retains the original index.
 		for seen[row] {
 			row += " "
 		}

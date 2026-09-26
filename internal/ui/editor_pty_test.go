@@ -4,12 +4,14 @@ import (
 	"errors"
 	"io"
 	"os"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/creack/pty"
+	"golang.org/x/term"
 )
 
 // The line editor only exists on a real terminal: raw mode, escape sequences,
@@ -28,11 +30,19 @@ type editorRun struct {
 }
 
 type lineResult struct {
-	line string
-	err  error
+	line     string
+	err      error
+	restored bool
 }
 
 func startReadLine(t *testing.T, prompt, initial string) *editorRun {
+	t.Helper()
+	return startTerminalPrompt(t, func(console *Console, in *os.File) (string, error) {
+		return console.ReadLine(in, prompt, initial)
+	})
+}
+
+func startTerminalPrompt(t *testing.T, prompt func(*Console, *os.File) (string, error)) *editorRun {
 	t.Helper()
 
 	master, slave, err := pty.Open()
@@ -47,6 +57,10 @@ func startReadLine(t *testing.T, prompt, initial string) *editorRun {
 
 	console := NewConsole(slave)
 	console.SetWidth(80)
+	before, err := term.GetState(int(slave.Fd()))
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	run := &editorRun{t: t, master: master, result: make(chan lineResult, 1)}
 
@@ -68,8 +82,9 @@ func startReadLine(t *testing.T, prompt, initial string) *editorRun {
 	}()
 
 	go func() {
-		line, err := console.ReadLine(slave, prompt, initial)
-		run.result <- lineResult{line: line, err: err}
+		line, err := prompt(console, slave)
+		after, stateErr := term.GetState(int(slave.Fd()))
+		run.result <- lineResult{line: line, err: err, restored: stateErr == nil && reflect.DeepEqual(before, after)}
 		_ = slave.Close()
 	}()
 
@@ -113,6 +128,9 @@ func (r *editorRun) finish() (string, error) {
 
 	select {
 	case result := <-r.result:
+		if !result.restored {
+			r.t.Fatal("prompt did not restore terminal settings")
+		}
 		return result.line, result.err
 	case <-time.After(5 * time.Second):
 		r.t.Fatal("ReadLine never returned")
@@ -231,11 +249,34 @@ func TestCtrlCEndsTheEditor(t *testing.T) {
 	select {
 	case result := <-run.result:
 		// io.EOF is what the caller turns into "the user left".
+		if !result.restored {
+			t.Fatal("Ctrl+C did not restore terminal settings")
+		}
 		if !errors.Is(result.err, io.EOF) {
 			t.Fatalf("Ctrl+C returned %v, want io.EOF", result.err)
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("Ctrl+C did not end the editor")
+	}
+}
+
+func TestCtrlCAfterEscapeEndsTheEditor(t *testing.T) {
+	run := startReadLine(t, "▸ Paste a media URL: ", "")
+	run.waitFor("Paste a media URL")
+
+	// Escape leaves the key decoder waiting for more bytes. Ctrl+C must
+	// still interrupt, even when it arrives in the same terminal read.
+	run.send("\x1b\x03")
+	select {
+	case result := <-run.result:
+		if !result.restored {
+			t.Fatal("Ctrl+C after Escape did not restore terminal settings")
+		}
+		if !errors.Is(result.err, io.EOF) {
+			t.Fatalf("Ctrl+C after Escape returned %v, want io.EOF", result.err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("Ctrl+C after Escape did not end the editor")
 	}
 }
 
