@@ -456,7 +456,7 @@ func (a *App) reportSuccess() (stage, error) {
 		switch picked {
 		case 0:
 			a.resetForNextDownload()
-			return stageLink, nil
+			return stageSource, nil
 		case 1:
 			a.reveal()
 		default:

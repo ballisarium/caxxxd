@@ -105,15 +105,15 @@ func TestARefusedFolderIsExplainedOnTheScreenThatFollows(t *testing.T) {
 func TestTheLogoOpensASessionAndEveryNewItem(t *testing.T) {
 	session := newSession(t, script(videoPath(pick("Download another"))...)).onATerminal().run()
 
-	// Once for the dependency check, once for each link screen.
+	// Once for the dependency check, then each source and link screen.
 	logos := 0
 	for _, screen := range session.screens() {
 		if strings.Contains(screen, "media downloads without the flag maze") {
 			logos++
 		}
 	}
-	if logos != 3 {
-		t.Fatalf("the logo was drawn on %d screens, want the opening one and both links", logos)
+	if logos != 5 {
+		t.Fatalf("the logo was drawn on %d screens, want the opening one and both source/link pairs", logos)
 	}
 }
 

@@ -5,6 +5,8 @@ package ytdlp
 
 // RawInfo mirrors the subset of `yt-dlp --dump-single-json` caxxxd needs.
 type RawInfo struct {
+	RawFormat
+	URL               string                   `json:"url"`
 	ID                string                   `json:"id"`
 	Title             string                   `json:"title"`
 	Uploader          string                   `json:"uploader"`

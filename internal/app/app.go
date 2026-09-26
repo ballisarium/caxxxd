@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ballisarium/caxxxd/internal/browser"
 	"github.com/ballisarium/caxxxd/internal/config"
 	"github.com/ballisarium/caxxxd/internal/deps"
 	"github.com/ballisarium/caxxxd/internal/domain"
@@ -54,6 +55,7 @@ type TranscriptConverter interface {
 // Options carries the flow's dependencies. Anything left zero-valued is filled
 // in with the real implementation, so tests inject only what they care about.
 type Options struct {
+	OpenBrowser         func(context.Context, string) (browser.Capture, error)
 	ConfigureCookies    bool
 	InitialURL          string
 	Section             *domain.TimeRange
@@ -110,6 +112,8 @@ type App struct {
 	failure       Failure
 	completedPath string
 	initialURL    string
+	capture       browser.Capture
+	captureConfig string
 
 	current stage
 	pending []message
@@ -167,6 +171,9 @@ func New(options Options) *App {
 }
 
 func withDefaults(options Options) Options {
+	if options.OpenBrowser == nil {
+		options.OpenBrowser = browser.Launcher{}.Start
+	}
 	if options.Checker.LookPath == nil || options.Checker.Version == nil {
 		options.Checker = deps.NewChecker()
 	}
@@ -226,7 +233,10 @@ func revealInFileBrowser(path string) error {
 }
 
 // Run draws the session and walks the steps until the user leaves.
-func (a *App) Run(ctx context.Context) error {
+func (a *App) Run(ctx context.Context) (runErr error) {
+	defer func() {
+		runErr = errors.Join(runErr, a.closeCapture())
+	}()
 	a.console.SetStatus(ui.Status{
 		Version:     a.options.Version,
 		Steps:       len(stepTitles),
@@ -251,8 +261,14 @@ func (a *App) Run(ctx context.Context) error {
 		return err
 	}
 
-	stage := stageLink
+	stage := stageSource
+	if a.initialURL != "" {
+		stage = stageLink
+	}
 	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		next, err := a.step(ctx, stage)
 		switch {
 		case errors.Is(err, errQuit), errors.Is(err, ErrInterrupted):
@@ -402,11 +418,15 @@ func toolMark(name string, dependency deps.Dependency) string {
 // request builds the download request described by the current selection.
 func (a *App) request() ytdlp.DownloadRequest {
 	request := ytdlp.DownloadRequest{
+		ConfigFile:    a.captureConfig,
 		CookieBrowser: a.preferences.CookieBrowser,
 		URL:           a.url,
 		Mode:          a.mode,
 		OutputDir:     a.outputDir,
 		Section:       a.options.Section,
+	}
+	if a.capture != nil {
+		request.CookieBrowser = ""
 	}
 
 	switch a.mode {
@@ -452,6 +472,9 @@ func (a *App) clearManualSelection() {
 // resetForNextDownload clears everything about the finished item but keeps the
 // preferences the user just confirmed.
 func (a *App) resetForNextDownload() {
+	if err := a.closeCapture(); err != nil {
+		a.carry("Browser cleanup failed", err.Error())
+	}
 	a.info = ytdlp.MediaInfo{}
 	a.url = ""
 	a.initialURL = ""

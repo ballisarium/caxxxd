@@ -33,6 +33,10 @@ const (
 	stageManualAudio
 	stageReview
 	stageDownload
+	stageSource
+	stageSources
+	stageBrowserPage
+	stageCapture
 )
 
 // stepTitles are the steps the status bar counts. Several stages share one
@@ -42,7 +46,7 @@ var stepTitles = []string{"Link", "Media", "Format", "Review", "Download"}
 // stepOf maps a stage onto its step number and title.
 func stepOf(current stage) (int, string) {
 	switch current {
-	case stageLink:
+	case stageLink, stageSource, stageSources, stageBrowserPage, stageCapture:
 		return 1, stepTitles[0]
 	case stageRange, stageRangeStart, stageRangeEnd, stageRangeConfirm, stageMode:
 		return 2, stepTitles[1]
@@ -65,7 +69,7 @@ func (a *App) screen(current stage) {
 	number, title := stepOf(current)
 
 	a.console.Screen()
-	if current == stageLink {
+	if current == stageLink || current == stageSource {
 		// The link step is where a session starts, and the only screen with
 		// room for the logo: everywhere else that space belongs to the media.
 		a.console.Logo(a.options.Version)
@@ -96,6 +100,14 @@ func (a *App) step(ctx context.Context, current stage) (stage, error) {
 	a.screen(current)
 
 	switch current {
+	case stageSource:
+		return a.askSource()
+	case stageSources:
+		return a.showSources()
+	case stageBrowserPage:
+		return a.askBrowserPage(ctx)
+	case stageCapture:
+		return a.askCapture(ctx)
 	case stageLink:
 		return a.askLink(ctx)
 	case stageRange:
@@ -180,7 +192,12 @@ func (a *App) fetchMetadata(ctx context.Context) (stage, error) {
 		err  error
 	)
 	if interrupted(ctx, func(runCtx context.Context) {
-		info, err = a.options.Client.Fetch(runCtx, a.url)
+		client := a.options.Client
+		client.ConfigFile = a.captureConfig
+		if a.capture != nil {
+			client.CookieBrowser = ""
+		}
+		info, err = client.Fetch(runCtx, a.url)
 	}) {
 		return stageLink, errQuit
 	}
@@ -190,8 +207,13 @@ func (a *App) fetchMetadata(ctx context.Context) (stage, error) {
 		// The rejected URL is not a loaded item. Do not offer it as the next
 		// answer when the user chooses to try another link.
 		a.url = ""
+		if a.capture != nil {
+			return a.reportFailure(classifyMetadataError(err),
+				recovery{"Choose another stream", "refresh the page or select another resource", stageCapture})
+		}
 		return a.reportFailure(classifyMetadataError(err),
 			recovery{"Try another link", "start again from the URL", stageLink},
+			recovery{"Choose a source", "try browser capture or another source", stageSource},
 		)
 	}
 
@@ -446,6 +468,9 @@ func (a *App) backFromRange() stage {
 	a.rangeReturn = stageMode
 	if next == stageReview {
 		return stageReview
+	}
+	if a.capture != nil {
+		return stageCapture
 	}
 	return stageLink
 }

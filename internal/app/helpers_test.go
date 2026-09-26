@@ -225,6 +225,7 @@ type scriptPrompter struct {
 	// Existing tests focus on later decisions. They keep the new default
 	// behaviour by accepting the whole-video range unless a range test opts in.
 	autoWholeVideo bool
+	autoSource     bool
 
 	questions []string
 	menus     []menu
@@ -238,7 +239,7 @@ type menu struct {
 }
 
 func script(answers ...answer) *scriptPrompter {
-	return &scriptPrompter{answers: answers, autoWholeVideo: true}
+	return &scriptPrompter{answers: answers, autoWholeVideo: true, autoSource: true}
 }
 
 func (s *scriptPrompter) next(kind answerKind, question string) (answer, bool) {
@@ -273,6 +274,9 @@ func (s *scriptPrompter) Text(question, _, initial string) (string, error) {
 
 func (s *scriptPrompter) Choose(question string, choices []app.Choice, _ int) (int, error) {
 	s.t.Helper()
+	if question == "Download from" && s.autoSource {
+		return 0, nil
+	}
 	s.questions = append(s.questions, question)
 
 	labels := make([]string, 0, len(choices))

@@ -48,6 +48,7 @@ type Client struct {
 	Binary        string
 	Runner        OutputRunner
 	CookieBrowser string
+	ConfigFile    string
 }
 
 // NewClient returns a Client that shells out to the given yt-dlp binary.
@@ -66,6 +67,9 @@ func (c Client) Fetch(ctx context.Context, rawURL string) (MediaInfo, error) {
 	if err != nil {
 		return MediaInfo{}, err
 	}
+	if c.ConfigFile != "" {
+		args = append(args, "--config-locations", c.ConfigFile)
+	}
 	args = append(args,
 		"--dump-single-json",
 		"--no-warnings",
@@ -82,6 +86,12 @@ func (c Client) Fetch(ctx context.Context, rawURL string) (MediaInfo, error) {
 	var raw RawInfo
 	if err := json.Unmarshal(payload, &raw); err != nil {
 		return MediaInfo{}, fmt.Errorf("decode metadata: %w", err)
+	}
+	if len(raw.Formats) == 0 && raw.URL != "" {
+		if raw.RawFormat.ID == "" {
+			raw.RawFormat.ID = "http"
+		}
+		raw.Formats = []RawFormat{raw.RawFormat}
 	}
 	formats := NormalizeFormats(raw.Formats)
 	subtitles := normalizeSubtitles(raw.Subtitles, raw.AutomaticCaptions)

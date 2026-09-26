@@ -20,6 +20,7 @@ const (
 // DownloadRequest is a fully resolved download: what to fetch, how, and where.
 // Manual selections take precedence over the preset fields.
 type DownloadRequest struct {
+	ConfigFile        string
 	CookieBrowser     string
 	URL               string
 	Mode              domain.MediaMode
@@ -65,13 +66,16 @@ func BuildCommand(request DownloadRequest) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
+	if request.ConfigFile != "" {
+		args = append(args, "--config-locations", request.ConfigFile)
+	}
 	args = append(args,
 		"--no-playlist",
+		"--abort-on-unavailable-fragments",
 		"--newline",
 		"--progress",
 		"--progress-delta", "0.2",
 		"--output-na-placeholder", "NA",
-		"--abort-on-unavailable-fragments",
 		"--progress-template", "download:"+progressMarker+"%(progress.status)s\t%(progress.downloaded_bytes)s\t%(progress.total_bytes)s\t%(progress.total_bytes_estimate)s\t%(progress.speed)s\t%(progress.eta)s",
 		"--progress-template", "postprocess:"+postProcessMarker+"%(progress.status)s",
 		"--print", "after_move:"+fileMarker+"%(filepath)s",
