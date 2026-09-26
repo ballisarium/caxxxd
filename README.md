@@ -113,3 +113,5 @@ the normal test suite uses fixtures and fake services, without a network account
 ## license
 
 MIT. see [LICENSE](LICENSE).
+- completion requires a nonempty output file, not just a successful tool exit.
+- missing HLS/DASH fragments fail the download instead of silently leaving gaps.

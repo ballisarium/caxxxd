@@ -52,9 +52,14 @@ func (d slowDownloader) Start(ctx context.Context, args []string) (<-chan ytdlp.
 		events <- ytdlp.RunEvent{Parsed: ytdlp.Event{Kind: ytdlp.EventPostProcess, Stage: "started"}}
 		time.Sleep(4 * time.Second)
 
+		path := filepath.Join(d.dir, "deep house for long coding sessions [h0dRXiGf9nU].opus")
+		if err := os.WriteFile(path, []byte("UI demo fixture"), 0o600); err != nil {
+			events <- ytdlp.RunEvent{Done: true, Err: err}
+			return
+		}
 		events <- ytdlp.RunEvent{Parsed: ytdlp.Event{
 			Kind:     ytdlp.EventCompletedFile,
-			FilePath: filepath.Join(d.dir, "deep house for long coding sessions [h0dRXiGf9nU].opus"),
+			FilePath: path,
 		}}
 		events <- ytdlp.RunEvent{Done: true}
 	}()

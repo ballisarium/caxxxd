@@ -414,7 +414,7 @@ func TestARetryRunsTheDownloadAgain(t *testing.T) {
 	downloader := newFakeDownloader()
 	downloader.setScripts(
 		[]ytdlp.RunEvent{doneEvent(errors.New("exit status 1"))},
-		[]ytdlp.RunEvent{completedEvent("/tmp/Example Video.mkv"), doneEvent(nil)},
+		[]ytdlp.RunEvent{completedEvent(filepath.Join(t.TempDir(), "Example Video.mkv")), doneEvent(nil)},
 	)
 
 	session := downloadSession(t, downloader, pick("Try again"), pick("Quit")).run()
@@ -491,11 +491,19 @@ func TestAudioPreferencesAreRememberedToo(t *testing.T) {
 	}
 }
 
-func TestSuccessWithoutAReportedPathPointsAtTheFolder(t *testing.T) {
+func TestDownloadWithoutAReportedPathDoesNotClaimSuccess(t *testing.T) {
 	session := downloadSession(t, newFakeDownloader(doneEvent(nil)), pick("Quit")).run()
 
-	session.requireDrawn("Download complete", "Folder")
-	session.requireNotDrawn("File ")
+	session.requireNotDrawn("Download complete")
+	session.requireDrawn("No completed file was verified")
+}
+
+func TestReportedButMissingFileDoesNotClaimSuccess(t *testing.T) {
+	downloader := newFakeDownloader(completedEvent(filepath.Join(t.TempDir(), "missing.mkv")), doneEvent(nil))
+	downloader.skipFiles = true
+	session := downloadSession(t, downloader, pick("Quit")).run()
+	session.requireNotDrawn("Download complete")
+	session.requireDrawn("No completed file was verified")
 }
 
 func TestRevealFailureIsNotFatal(t *testing.T) {

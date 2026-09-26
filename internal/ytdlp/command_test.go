@@ -106,6 +106,7 @@ func TestBuildAlwaysSetsStructuredOutputContract(t *testing.T) {
 	}
 
 	assertContainsSequence(t, args, "--no-playlist")
+	assertContainsSequence(t, args, "--abort-on-unavailable-fragments")
 	assertContainsSequence(t, args, "--newline")
 	assertContainsSequence(t, args, "--progress-delta", "0.2")
 	assertContainsSequence(t, args, "--output-na-placeholder", "NA")

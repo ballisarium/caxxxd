@@ -71,6 +71,7 @@ func BuildCommand(request DownloadRequest) ([]string, error) {
 		"--progress",
 		"--progress-delta", "0.2",
 		"--output-na-placeholder", "NA",
+		"--abort-on-unavailable-fragments",
 		"--progress-template", "download:"+progressMarker+"%(progress.status)s\t%(progress.downloaded_bytes)s\t%(progress.total_bytes)s\t%(progress.total_bytes_estimate)s\t%(progress.speed)s\t%(progress.eta)s",
 		"--progress-template", "postprocess:"+postProcessMarker+"%(progress.status)s",
 		"--print", "after_move:"+fileMarker+"%(filepath)s",

@@ -176,6 +176,14 @@ func (a *App) runDownload(ctx context.Context) (stage, error) {
 				)
 			}
 		}
+		file, err := os.Stat(a.completedPath)
+		if err != nil || !file.Mode().IsRegular() || file.Size() == 0 {
+			return a.reportFailure(Failure{
+				Category: FailureTool,
+				NextStep: "No completed file was verified. Check the destination and retry the download.",
+			}, recovery{"Try again", "run the same download once more", stageDownload},
+				recovery{"Change something", "go back to the review", stageReview})
+		}
 		return a.reportSuccess()
 	}
 }
@@ -311,10 +319,10 @@ func (a *App) stream(ctx context.Context, args []string) (outcome, error) {
 		}
 	}
 
-	// The runner always sends a terminal event before closing, so arriving
-	// here means there is simply nothing left to report.
+	// A closed stream without a terminal result cannot prove success.
 	progress.Stop()
-	return a.classifyOutcome(ctx, runCtx, nil), nil
+	err = errors.New("yt-dlp stopped without reporting its exit status")
+	return a.classifyOutcome(ctx, runCtx, err), err
 }
 
 // classifyOutcome separates a failure from a download the user stopped.

@@ -72,12 +72,13 @@ func missingChecker() deps.Checker {
 // just like the real downloader. Cancelling the context ends the run with
 // context.Canceled, exactly as the runner does.
 type fakeDownloader struct {
-	script   []ytdlp.RunEvent
-	perRun   [][]ytdlp.RunEvent
-	startErr error
-	args     []string
-	runs     int
-	onStart  func([]string)
+	script    []ytdlp.RunEvent
+	perRun    [][]ytdlp.RunEvent
+	startErr  error
+	args      []string
+	runs      int
+	onStart   func([]string)
+	skipFiles bool
 }
 
 func newFakeDownloader(events ...ytdlp.RunEvent) *fakeDownloader {
@@ -111,6 +112,15 @@ func (f *fakeDownloader) Start(ctx context.Context, args []string) (<-chan ytdlp
 
 	events := make(chan ytdlp.RunEvent, len(script)+2)
 	for _, event := range script {
+		if event.Parsed.Kind == ytdlp.EventCompletedFile && !f.skipFiles {
+			path := event.Parsed.FilePath
+			if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+				return nil, err
+			}
+			if err := os.WriteFile(path, []byte("downloaded fixture"), 0o600); err != nil {
+				return nil, err
+			}
+		}
 		events <- event
 	}
 
