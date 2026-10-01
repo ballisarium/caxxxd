@@ -44,24 +44,24 @@ func captureGroups(items []browser.Candidate) []capturedGroup {
 
 func captureDetail(item browser.Candidate) string {
 	parts := []string{}
+	if item.Size > 0 {
+		parts = append(parts, ui.FormatSize(item.Size, item.Approximate))
+	} else {
+		parts = append(parts, "size unknown")
+	}
 	if item.Height > 0 {
 		parts = append(parts, strconv.Itoa(item.Height)+"p")
 	}
 	if item.Duration > 0 {
 		parts = append(parts, ui.FormatDuration(item.Duration))
 	}
-	if item.Codecs != "" {
-		parts = append(parts, item.Codecs)
-	}
-	if item.Size > 0 {
-		parts = append(parts, ui.FormatSize(item.Size, item.Approximate))
-	} else {
-		parts = append(parts, "size unknown")
-	}
 	if item.Source != "" {
 		parts = append(parts, item.Source)
 	} else {
 		parts = append(parts, item.Host)
+	}
+	if item.Codecs != "" {
+		parts = append(parts, item.Codecs)
 	}
 	return strings.Join(parts, " · ")
 }

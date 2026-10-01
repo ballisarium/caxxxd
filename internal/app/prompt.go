@@ -4,6 +4,7 @@ import (
 	"errors"
 	"io"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/ballisarium/caxxxd/internal/ui"
@@ -47,7 +48,7 @@ const filterThreshold = 9
 func filterable(options int) bool { return options >= filterThreshold }
 
 // menuHeight is the tallest a menu is allowed to be before it starts scrolling.
-const menuHeight = 12
+const menuHeight = 8
 
 // selectorColumns is what the menu spends before a row. While choosing, that
 // is two: the selector, or the blank standing in for it. The line it leaves
@@ -97,17 +98,26 @@ func (p TerminalPrompter) Choose(question string, choices []Choice, initial int)
 		initial = 0
 	}
 
-	p.console.Hint("↑ / ↓  Move   Enter  Select   Ctrl+C  Quit")
-	selected, err := p.console.Select(p.in, p.ask(question), labels, initial, menuHeight, filterable(len(labels)))
+	items := make([]ui.MenuItem, len(choices))
+	for i := range choices {
+		items[i] = ui.MenuItem{ID: strconv.Itoa(i), Label: labels[i], Detail: choices[i].Detail}
+	}
+	key, err := p.console.SelectItems(p.in, p.ask(question), items, strconv.Itoa(initial), menuHeight, filterable(len(labels)))
 	p.console.Blank()
 	if errors.Is(err, io.EOF) {
 		return 0, ErrInterrupted
 	}
-	return selected, err
+	if err != nil {
+		return 0, err
+	}
+	selected, err := strconv.Atoi(key)
+	if err != nil || selected < 0 || selected >= len(choices) {
+		return 0, errNoSuchChoice
+	}
+	return selected, nil
 }
 
 func (p TerminalPrompter) ChooseLive(question string, choices func() ([]LiveChoice, error), initial string) (string, error) {
-	p.console.Hint("↑ / ↓  Move   Enter  Select   Type to filter   Ctrl+C  Quit")
 	items := func() ([]ui.MenuItem, error) {
 		rows, err := choices()
 		if err != nil {
@@ -120,7 +130,7 @@ func (p TerminalPrompter) ChooseLive(question string, choices func() ([]LiveChoi
 		labels := menuLabels(static, p.console.Width()-selectorColumns)
 		menu := make([]ui.MenuItem, len(rows))
 		for i := range rows {
-			menu[i] = ui.MenuItem{ID: rows[i].Key, Label: labels[i]}
+			menu[i] = ui.MenuItem{ID: rows[i].Key, Label: labels[i], Detail: rows[i].Detail}
 		}
 		return menu, nil
 	}

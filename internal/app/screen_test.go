@@ -108,7 +108,7 @@ func TestTheLogoOpensASessionAndEveryNewItem(t *testing.T) {
 	// Once for the dependency check, then each source and link screen.
 	logos := 0
 	for _, screen := range session.screens() {
-		if strings.Contains(screen, "media downloads without the flag maze") {
+		if strings.Contains(screen, "caxxxd  ·  test") {
 			logos++
 		}
 	}

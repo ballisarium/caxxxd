@@ -10,14 +10,11 @@ import (
 	"golang.org/x/term"
 )
 
-// Tagline is the one-line description under the logo.
-const Tagline = "media downloads without the flag maze"
-
 // The layout is drawn to the terminal, but never narrower than MinWidth or
 // wider than MaxWidth: a full-width panel on a maximised window reads as a
 // stretched banner rather than as a card.
 const (
-	MinWidth = 60
+	MinWidth = 40
 	MaxWidth = 104
 )
 
@@ -49,6 +46,7 @@ type Console struct {
 	clears      bool
 	animates    bool
 	raw         bool
+	screenRows  int
 
 	// lastBar is the status the bar currently on screen was drawn from, so a
 	// step that changes nothing does not draw it again.
@@ -117,6 +115,7 @@ func (c *Console) Screen() {
 		c.width = terminalWidth()
 	}
 	c.barDrawn = false
+	c.screenRows = 0
 }
 
 // SetClearScreens overrides the detection above. Tests use it to render the
@@ -151,38 +150,13 @@ func (c *Console) SetStatus(status Status) { c.status = status }
 // SetDestination updates just the download folder the status bar shows.
 func (c *Console) SetDestination(destination string) { c.status.Destination = destination }
 
-// Logo prints the product name as block letters shaded across the Klein ramp,
-// with the tagline and version beneath it.
+// Logo keeps the product and version visible without pushing actions down.
 func (c *Console) Logo(version string) {
-	letters := make(pterm.Letters, 0, len("caxxxd"))
-	name := []rune("caxxxd")
-	for index, character := range name {
-		// The ramp runs across the word so the logo reads as one gradient
-		// rather than six separately coloured letters.
-		shade := c.theme.Lift.Fade(0, float32(len(name)-1), float32(index), c.theme.Glow)
-		letters = append(letters, pterm.Letter{
-			String: string(character),
-			RGB:    shade,
-			Style:  pterm.NewStyle(pterm.FgLightBlue),
-		})
-	}
-
-	logo, err := pterm.DefaultBigText.WithLetters(letters).Srender()
-	if err != nil {
-		// Block letters are decoration; the name still has to appear.
-		logo = "caxxxd\n"
-	}
-
-	c.line("")
-	for _, row := range strings.Split(strings.TrimRight(logo, "\n"), "\n") {
-		c.line(" " + row)
-	}
-
-	subtitle := c.theme.Mist.Sprint(Tagline)
+	label := c.theme.Glow.Sprint("caxxxd")
 	if version != "" {
-		subtitle += c.theme.Slate.Sprint("  ·  " + version)
+		label += c.theme.Slate.Sprint("  ·  " + version)
 	}
-	c.line(" " + subtitle)
+	c.line(" " + label)
 	c.line("")
 }
 
@@ -408,6 +382,7 @@ func (c *Console) Blank() { c.line("") }
 
 func (c *Console) line(text string) {
 	_, _ = io.WriteString(c.out, text+c.newline())
+	c.screenRows++
 }
 
 // newline is what ends a line. Raw mode turns off the translation that makes a

@@ -474,10 +474,16 @@ func (a *App) reportSuccess() (stage, error) {
 		a.screen(stageDownload)
 		a.console.Success("Download complete", a.console.Fields(fields)...)
 
-		choices := []Choice{
-			{Label: "Download another", Detail: "start again from a new link"},
-			{Label: "Reveal in Finder", Detail: revealDetail(a.completedPath)},
+		choices := []Choice{}
+		openIndex := -1
+		if a.completedPath != "" {
+			openIndex = len(choices)
+			choices = append(choices, Choice{Label: "Open file", Detail: "open with your default app"})
 		}
+		revealIndex := len(choices)
+		choices = append(choices, Choice{Label: "Reveal in Finder", Detail: revealDetail(a.completedPath)})
+		anotherIndex := len(choices)
+		choices = append(choices, Choice{Label: "Download another", Detail: "choose a new link or web page"})
 		continueIndex := -1
 		if len(a.queue) > 0 {
 			continueIndex = len(choices)
@@ -490,10 +496,14 @@ func (a *App) reportSuccess() (stage, error) {
 		}
 
 		switch picked {
-		case 0:
+		case openIndex:
+			if err := a.options.OpenFile(a.completedPath); err != nil {
+				a.carryHint("Could not open the file. Use Reveal in Finder to choose an app.")
+			}
+		case anotherIndex:
 			a.resetForNextDownload()
 			return stageSource, nil
-		case 1:
+		case revealIndex:
 			a.reveal()
 		case continueIndex:
 			return a.startNextQueued()

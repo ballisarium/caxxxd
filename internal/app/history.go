@@ -63,7 +63,7 @@ func (a *App) askHistory() (stage, error) {
 		available[index] = historyFileAvailable(entry.Path)
 		choices = append(choices, Choice{
 			Label:  name,
-			Detail: historyEntryDetail(entry, available[index]),
+			Detail: historyEntryDetail(entry, available[index]) + " · " + collapseHome(filepath.Dir(entry.Path), a.options.Home),
 		})
 	}
 	choices = append(choices, backChoice)

@@ -18,8 +18,17 @@ import (
 
 // MenuItem is one selectable entry in a menu that may update while open.
 type MenuItem struct {
-	ID    string
-	Label string
+	ID     string
+	Label  string
+	Detail string
+}
+
+// SelectItems keeps complete descriptions separate from the compact list rows.
+func (c *Console) SelectItems(in *os.File, prompt string, items []MenuItem, initialID string, height int, filter bool) (string, error) {
+	if in == nil || len(items) == 0 {
+		return "", io.EOF
+	}
+	return c.selectMenu(in, prompt, func() ([]MenuItem, error) { return items, nil }, initialID, height, filter, false)
 }
 
 // Select reads keys as a stream, independently of terminal read boundaries.
@@ -94,7 +103,29 @@ func (c *Console) selectMenu(in *os.File, prompt string, provideItems func() ([]
 	needsDraw := true
 	for {
 		if needsDraw {
+			description := []string{}
+			if len(matches) > 0 {
+				item := items[matches[selected].OriginalIndex]
+				if item.Detail != "" && !strings.Contains(item.Label, item.Detail) {
+					wrapped := wrap(item.Detail, max(c.menuWidth(in)-2, 1))
+					description = append(description, "")
+					for i := 0; i < min(len(wrapped), 3); i++ {
+						line := wrapped[i]
+						if i == 2 && len(wrapped) > 3 {
+							line = Truncate(line, c.menuWidth(in)-4) + " …"
+						}
+						description = append(description, c.theme.Mist.Sprint("  "+line))
+					}
+				}
+			}
 			visibleHeight := min(height, max(len(matches), 1))
+			if _, terminalRows, err := term.GetSize(int(in.Fd())); err == nil && terminalRows > 0 && c.clears {
+				// Reserve the heading, description, controls and the final cursor
+				// line so redrawing a menu cannot scroll away the summary above it.
+				bodyRows := c.screenRows - lines
+				room := terminalRows - bodyRows - len(strings.Split(prompt, "\n")) - len(description) - 4
+				visibleHeight = min(visibleHeight, max(room, 1))
+			}
 			first = clamp(first, 0, max(len(matches)-visibleHeight, 0))
 			if selected < first {
 				first = selected
@@ -104,16 +135,36 @@ func (c *Console) selectMenu(in *os.File, prompt string, provideItems func() ([]
 			}
 			rows := make([]string, 0, visibleHeight)
 			for index := first; index < min(first+visibleHeight, len(matches)); index++ {
-				prefix := "  "
+				label := items[matches[index].OriginalIndex].Label
 				if index == selected {
-					prefix = c.theme.OnKlein.Sprint("▶") + " "
+					width := c.menuWidth(in)
+					row := Truncate("▶ "+label, width)
+					rows = append(rows, c.theme.OnKlein.Sprint(Pad(row, width)))
+				} else {
+					rows = append(rows, "  "+label)
 				}
-				rows = append(rows, prefix+matches[index].Target)
 			}
 			heading := prompt + ":"
-			if filter {
-				heading = prompt + " [type to search]: " + query
+			if filter && query != "" {
+				heading += " " + query
 			}
+			if len(matches) == 0 {
+				rows = append(rows, c.theme.Mist.Sprint("  No matches. Clear the filter."))
+			}
+			rows = append(rows, description...)
+			rows = append(rows, "", c.theme.Slate.Sprint("  ↑↓ Move  Enter Select  Ctrl+C Exit"))
+			position := fmt.Sprintf("  %d/%d", selected+1, len(matches))
+			if len(matches) == 0 {
+				position = "  0 matches"
+			}
+			if filter {
+				if query == "" {
+					position += " · Type to filter"
+				} else {
+					position += " · Ctrl+U Clear filter"
+				}
+			}
+			rows = append(rows, c.theme.Slate.Sprint(position))
 			lines = c.drawMenu(in, lines, heading, rows)
 			needsDraw = false
 		}
@@ -161,7 +212,7 @@ func (c *Console) selectMenu(in *os.File, prompt string, provideItems func() ([]
 		case '\r', '\n':
 			if len(matches) > 0 {
 				choice := matches[selected]
-				c.drawMenu(in, lines, prompt+": "+query, []string{"  " + c.theme.OnKlein.Sprint("▶") + " " + choice.Target})
+				c.drawMenu(in, lines, prompt+": "+query, []string{"  " + c.theme.OnKlein.Sprint("▶") + " " + items[choice.OriginalIndex].Label})
 				return items[choice.OriginalIndex].ID, nil
 			}
 		case menuUp, '\x10':
@@ -194,7 +245,7 @@ func (c *Console) selectMenu(in *os.File, prompt string, provideItems func() ([]
 func rankMenuItems(query string, items []MenuItem) fuzzy.Ranks {
 	labels := make([]string, len(items))
 	for index, item := range items {
-		labels[index] = item.Label
+		labels[index] = item.Label + " " + item.Detail
 	}
 	matches := fuzzy.RankFindFold(query, labels)
 	if len(matches) != len(items) {
@@ -247,16 +298,22 @@ func waitMenuInput(in *os.File, reader *bufio.Reader) (bool, error) {
 func (c *Console) drawMenu(in *os.File, previous int, heading string, rows []string) int {
 	if previous > 0 && c.clears {
 		_, _ = fmt.Fprintf(c.out, "\x1b[%dA\r\x1b[J", previous)
+		c.screenRows -= previous
 	}
-	width := c.Width()
-	if columns, _, err := term.GetSize(int(in.Fd())); err == nil && columns > 1 {
-		width = min(width, columns-1)
-	}
+	width := c.menuWidth(in)
 	lines := append(strings.Split(heading, "\n"), rows...)
 	for _, line := range lines {
 		c.line(truncateVisible(line, width))
 	}
 	return len(lines)
+}
+
+func (c *Console) menuWidth(in *os.File) int {
+	width := c.Width()
+	if columns, _, err := term.GetSize(int(in.Fd())); err == nil && columns > 1 {
+		width = min(width, columns-1)
+	}
+	return width
 }
 
 const (

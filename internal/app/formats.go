@@ -18,6 +18,7 @@ type streamTable struct {
 	headings []string
 	widths   []int
 	compact  bool
+	hideKind bool
 }
 
 // The widest layout, and what it needs: seven padded columns, one separator
@@ -36,6 +37,13 @@ var compactTable = streamTable{
 	compact:  true,
 }
 
+var narrowTable = streamTable{
+	headings: []string{"ID", "RESOLUTION", "SIZE", "EXT"},
+	widths:   []int{8, 10, 10, 0},
+	compact:  true,
+	hideKind: true,
+}
+
 // selectorRoom is the two columns the menu draws its selector in, plus the one
 // the heading is indented by.
 const selectorRoom = 3
@@ -45,7 +53,10 @@ func tableFor(width int) streamTable {
 	if width >= fullTable.minimumWidth() {
 		return fullTable
 	}
-	return compactTable
+	if width >= compactTable.minimumWidth() {
+		return compactTable
+	}
+	return narrowTable
 }
 
 // minimumWidth is the narrowest terminal this layout can be drawn in without
@@ -72,11 +83,11 @@ func (t streamTable) header() string {
 func (t streamTable) row(format ytdlp.Format) string {
 	size, approximate := format.EffectiveSize()
 
-	cells := []string{
-		ui.Truncate(format.ID, 8),
-		string(format.Kind),
-		resolutionLabel(format),
+	cells := []string{ui.Truncate(format.ID, 8)}
+	if !t.hideKind {
+		cells = append(cells, string(format.Kind))
 	}
+	cells = append(cells, resolutionLabel(format))
 	if !t.compact {
 		cells = append(cells,
 			fpsLabel(format),

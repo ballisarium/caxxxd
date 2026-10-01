@@ -239,11 +239,14 @@ func TestLogoNamesTheProduct(t *testing.T) {
 
 	console.Logo("1.2.3")
 
-	if !strings.Contains(output.String(), Tagline) {
-		t.Fatalf("the tagline is missing:\n%s", output.String())
+	if !strings.Contains(output.String(), "caxxxd") {
+		t.Fatalf("the product name is missing:\n%s", output.String())
 	}
 	if !strings.Contains(output.String(), "1.2.3") {
 		t.Fatalf("the version is missing:\n%s", output.String())
+	}
+	if len(strings.Split(strings.TrimSpace(output.String()), "\n")) > 3 {
+		t.Fatal("the opening header uses too much room for the download menu")
 	}
 }
 

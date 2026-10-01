@@ -48,7 +48,17 @@ var stepTitles = []string{"Link", "Media", "Format", "Review", "Download"}
 // stepOf maps a stage onto its step number and title.
 func stepOf(current stage) (int, string) {
 	switch current {
-	case stageLink, stageSource, stageSources, stageBrowserPage, stageCapture, stageQueue, stageHistory:
+	case stageSource:
+		return 1, "Start"
+	case stageQueue:
+		return 1, "Queue"
+	case stageHistory:
+		return 1, "History"
+	case stageCapture:
+		return 1, "Streams"
+	case stageBrowserPage:
+		return 1, "Browser"
+	case stageLink, stageSources:
 		return 1, stepTitles[0]
 	case stageRange, stageRangeStart, stageRangeEnd, stageRangeConfirm, stageMode:
 		return 2, stepTitles[1]
@@ -497,7 +507,6 @@ func (a *App) askVideoQuality() (stage, error) {
 	}
 	choices = append(choices, backChoice)
 
-	a.console.Hint("caxxxd never transcodes video, so quality is only ever the source quality.")
 	picked, err := a.prompt.Choose("Video quality", choices, 0)
 	if err != nil {
 		return stageVideoQuality, err
@@ -757,7 +766,7 @@ func (a *App) askReview() (stage, error) {
 	a.console.Panel("Ready to download", a.console.Fields(a.reviewFields())...)
 
 	choices := []Choice{
-		{Label: "Download", Detail: "run yt-dlp with exactly this"},
+		{Label: "Download", Detail: "save the file with these settings"},
 		{Label: "Change download folder", Detail: collapseHome(a.outputDir, a.options.Home)},
 	}
 	changeRange := -1

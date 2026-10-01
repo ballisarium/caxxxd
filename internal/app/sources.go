@@ -130,12 +130,9 @@ func (a *App) askCapture(ctx context.Context) (stage, error) {
 		}
 		return stageSource, nil
 	}
-	a.console.Hint("Play media in the browser. This list updates automatically.")
-	a.console.Hint("Keep the browser open until the download finishes.")
+	a.console.Hint("Play media to discover streams.")
+	a.console.Hint("Keep browser open. ~ = estimated size.")
 	items := a.capture.Candidates()
-	if len(items) > 0 {
-		a.console.Hint("Largest known sizes first · ~ estimate · unknown sizes last")
-	}
 	if len(items) == 200 {
 		a.console.Hint("Showing the first 200 resources. Reopen capture to scan a different page.")
 	}

@@ -243,6 +243,7 @@ func (a *App) askQueue() (stage, error) {
 			})
 		} else {
 			a.console.Hint("No queued downloads.")
+			a.console.Hint("Add items from the review screen.")
 		}
 		itemStart := len(choices)
 		for index, item := range a.queue {
@@ -274,7 +275,7 @@ func (a *App) askQueue() (stage, error) {
 		action, err := a.prompt.Choose("Queued item", []Choice{
 			{Label: "Remove from queue", Detail: "discard this reviewed selection"},
 			backChoice,
-		}, 0)
+		}, 1)
 		if err != nil {
 			return stageQueue, err
 		}

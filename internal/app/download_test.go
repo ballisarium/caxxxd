@@ -519,6 +519,27 @@ func TestRevealFailureIsNotFatal(t *testing.T) {
 	session.requireDrawn("Could not open Finder")
 }
 
+func TestCompletedDownloadCanBeOpenedWithoutLosingTheResult(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "Example Video.mkv")
+	var opened string
+	session := newSession(t, script(videoPath(pick("Open file"), pick("Quit"))...),
+		func(options *app.Options) {
+			options.Downloader = newFakeDownloader(completedEvent(path), doneEvent(nil))
+			options.OpenFile = func(target string) error {
+				opened = target
+				return errors.New("no player here")
+			}
+		}).run()
+	session.requireScripted()
+	if opened != path {
+		t.Fatalf("opened %q, want the verified output %q", opened, path)
+	}
+	session.requireDrawn("Could not open the file", "Download complete")
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("completed file is unavailable: %v", err)
+	}
+}
+
 func TestDownloadingAnotherStartsFromAnEmptyLink(t *testing.T) {
 	session := newSession(t, script(videoPath(pick("Download another"))...)).run()
 

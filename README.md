@@ -5,7 +5,7 @@
 a small terminal frontend for `yt-dlp` and `ffmpeg` on macOS. download video,
 audio, or plain-text subtitles through a short conversation.
 
-![caxxxd waiting for a media URL](docs/screen.png)
+![caxxxd opening download menu](docs/screen.png)
 
 ## install and update
 
@@ -35,6 +35,13 @@ sources** explains the available sources. after selecting media, choose the
 whole item or a clip, pick video, audio, or subtitles, then review and download.
 the destination folder is remembered. passing a URL on the command line goes
 straight to the media URL prompt.
+
+use the arrow keys and Enter to choose; Ctrl+C exits. long lists support
+typing to filter and Ctrl+U to clear the filter. the menu shows your position
+and scrolls to fit the window. when a row is shortened, its selected description
+appears below the list. the interface supports terminals from 40 columns wide.
+after a successful download, **Open file** launches the default app and
+**Reveal in Finder** shows the saved file.
 
 ```bash
 caxxxd

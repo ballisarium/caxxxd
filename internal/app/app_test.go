@@ -22,8 +22,8 @@ func TestSessionOpensWithTheLogoAndAStatusBar(t *testing.T) {
 	// shorten it; what it may never do is drop it altogether.
 	session.requireDrawn(
 		"caxxxd",
-		"media downloads without the flag maze",
-		"1/5  LINK",
+		"caxxxd  ·  test",
+		"1/5  START",
 		"yt-dlp ✔",
 		"ffmpeg ✔",
 		"/downloads",

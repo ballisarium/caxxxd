@@ -3,6 +3,7 @@ package ui
 import (
 	"os"
 	"strconv"
+	"strings"
 	"testing"
 )
 
@@ -50,5 +51,47 @@ func TestMenuSearchPreservesSelectionAndPaste(t *testing.T) {
 	selected, err := run.finish()
 	if err != nil || selected != "5" {
 		t.Fatalf("menu returned (%q, %v), want the matching option's original index", selected, err)
+	}
+}
+
+func TestMenuDescriptionRemainsReadableAndSearchable(t *testing.T) {
+	run := startTerminalPrompt(t, func(console *Console, in *os.File) (string, error) {
+		console.SetWidth(60)
+		return console.SelectItems(in, "Captured media", []MenuItem{
+			{ID: "video", Label: "MP4 · 512 MiB", Detail: "1080p · 2:00 · Original player on media.example.test · avc1,mp4a"},
+			{ID: "audio", Label: "M4A · 12 MiB", Detail: "Audio only · Второй плеер"},
+		}, "video", 8, true)
+	})
+	run.waitFor("Original player")
+	run.waitFor("Ctrl+C")
+	run.send("does not exist")
+	run.waitFor("No matches")
+	run.send("\x15ВТОРОЙ")
+	run.waitFor("Второй плеер")
+	selected, err := run.finish()
+	if err != nil || selected != "audio" {
+		t.Fatalf("description search returned (%q, %v), want audio", selected, err)
+	}
+}
+
+func TestMenuKeepsSummaryAndControlsWithinTheTerminalHeight(t *testing.T) {
+	run := startTerminalPrompt(t, func(console *Console, in *os.File) (string, error) {
+		console.Screen()
+		console.Panel("Ready to download", "Title", "Mode", "Quality", "Container", "Range", "Size", "Destination", "Source")
+		items := make([]MenuItem, 10)
+		for i := range items {
+			items[i] = MenuItem{ID: strconv.Itoa(i), Label: "Track " + strconv.Itoa(i), Detail: "A captured stream"}
+		}
+		return console.SelectItems(in, "Streams", items, "0", 8, false)
+	})
+	run.waitFor("1/10")
+	if lines := strings.Count(run.output(), "\n"); lines > 23 {
+		t.Fatalf("menu uses %d lines before its cursor in a 24-line terminal", lines)
+	}
+	run.send("\x1b[A")
+	run.waitFor("Track 9")
+	selected, err := run.finish()
+	if err != nil || selected != "9" {
+		t.Fatalf("scrolled menu returned (%q, %v), want the last item", selected, err)
 	}
 }

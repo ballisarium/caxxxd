@@ -303,7 +303,7 @@ func TestTheNarrowTableKeepsWhatIdentifiesAStream(t *testing.T) {
 	}
 
 	row := table.row(sampleStreams[0])
-	for _, fragment := range []string{"616-drc", "video", "3840x2160", "webm"} {
+	for _, fragment := range []string{"616-drc", "3840x2160", "webm"} {
 		if !strings.Contains(row, fragment) {
 			t.Fatalf("row = %q, want it to keep %q", row, fragment)
 		}
@@ -311,7 +311,7 @@ func TestTheNarrowTableKeepsWhatIdentifiesAStream(t *testing.T) {
 }
 
 func TestBothLayoutsAlignTheirColumns(t *testing.T) {
-	for name, table := range map[string]streamTable{"full": fullTable, "compact": compactTable} {
+	for name, table := range map[string]streamTable{"full": fullTable, "compact": compactTable, "narrow": narrowTable} {
 		header := " " + table.header()
 		row := "  " + table.row(sampleStreams[0])
 
