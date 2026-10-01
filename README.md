@@ -223,6 +223,26 @@ DASH, and embedded players.
 
 the normal test suite uses fixtures and fake services, without a network account.
 
+### GitHub Actions
+
+**CI** checks formatting, runs vet and race tests, and builds both macOS
+architectures on main pushes and pull requests. It also supports manual runs.
+**Release** runs the same checks, publishes tagged `v*` releases, updates the
+Homebrew cask, and generates GitHub build attestations for the release archives.
+The release job needs `HOMEBREW_TAP_TOKEN` with write access to
+`ballisarium/homebrew-tap`; the token is stored only in GitHub Actions secrets.
+
+A manual **Release** run builds an attested preview, available under the run's
+artifacts for seven days. It does not publish a release or update Homebrew.
+
+To verify an archive built by this workflow:
+
+```bash
+gh attestation verify caxxxd_VERSION_darwin_arm64.tar.gz --repo ballisarium/caxxxd
+```
+
+Earlier releases built locally do not have GitHub Actions attestations.
+
 ## license
 
 MIT. see [LICENSE](LICENSE).

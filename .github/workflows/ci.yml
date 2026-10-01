@@ -4,17 +4,23 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
     runs-on: macos-latest
+    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version: "1.26.5"
           cache: true
@@ -34,5 +40,11 @@ jobs:
       - name: Test
         run: go test ./... -race -count=1
 
-      - name: Build
-        run: go build ./cmd/caxxxd
+      - name: Build Apple Silicon and Intel binaries
+        env:
+          CGO_ENABLED: "0"
+          GOOS: darwin
+        run: |
+          mkdir -p .scratch
+          GOARCH=arm64 go build -o .scratch/caxxxd-arm64 ./cmd/caxxxd
+          GOARCH=amd64 go build -o .scratch/caxxxd-amd64 ./cmd/caxxxd
