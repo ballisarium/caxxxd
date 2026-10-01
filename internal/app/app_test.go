@@ -127,12 +127,13 @@ func TestGoingBackToTheLinkOffersTheOneAlreadyLoaded(t *testing.T) {
 	session.requireScripted()
 }
 
-func TestEmptyLinkIsRefusedAndAsksAgain(t *testing.T) {
-	session := newSession(t, script(text(""))).run()
-
-	session.requireDrawn("Nothing to download")
-	if len(session.prompter.prefills) != 2 {
-		t.Fatalf("the link was asked %d times, want 2", len(session.prompter.prefills))
+func TestEmptyLinkReturnsToTheOpeningMenu(t *testing.T) {
+	prompter := script(pick("Media URL"), text(""), pick("Quit"))
+	prompter.autoSource = false
+	session := newSession(t, prompter).run()
+	session.requireScripted()
+	if len(prompter.menusFor("Download from")) != 2 {
+		t.Fatal("an empty URL did not return to the opening menu")
 	}
 }
 

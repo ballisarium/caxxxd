@@ -273,7 +273,7 @@ func (a *App) Run(ctx context.Context) (runErr error) {
 	}
 
 	if err := a.checkDependencies(ctx); err != nil {
-		if errors.Is(err, errQuit) {
+		if errors.Is(err, errQuit) || errors.Is(err, ErrBack) || errors.Is(err, ErrInterrupted) {
 			return a.leave()
 		}
 		return err
@@ -364,6 +364,9 @@ func (a *App) checkDependencies(ctx context.Context) error {
 			{Label: "Check again", Detail: "look for the tools once more"},
 			{Label: "Quit", Detail: "leave caxxxd"},
 		}, 0)
+		if errors.Is(err, ErrBack) || errors.Is(err, ErrInterrupted) {
+			return err
+		}
 		if err != nil || choice == 1 {
 			return ErrDependenciesMissing
 		}

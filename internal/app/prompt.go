@@ -13,6 +13,9 @@ import (
 // ErrInterrupted is what a prompt returns when the user presses Ctrl+C.
 var ErrInterrupted = errors.New("interrupted")
 
+// ErrBack cancels a prompt while keeping the session running.
+var ErrBack = ui.ErrBack
+
 // errNoSuchChoice means the menu returned something that was never offered.
 var errNoSuchChoice = errors.New("the menu returned an unknown option")
 
@@ -104,6 +107,14 @@ func (p TerminalPrompter) Choose(question string, choices []Choice, initial int)
 	}
 	key, err := p.console.SelectItems(p.in, p.ask(question), items, strconv.Itoa(initial), menuHeight, filterable(len(labels)))
 	p.console.Blank()
+	if errors.Is(err, ErrBack) {
+		for i, choice := range choices {
+			if choice.Label == backChoice.Label {
+				return i, nil
+			}
+		}
+		return 0, ErrBack
+	}
 	if errors.Is(err, io.EOF) {
 		return 0, ErrInterrupted
 	}
@@ -136,6 +147,17 @@ func (p TerminalPrompter) ChooseLive(question string, choices func() ([]LiveChoi
 	}
 	selected, err := p.console.SelectLive(p.in, p.ask(question), items, initial, menuHeight, true)
 	p.console.Blank()
+	if errors.Is(err, ErrBack) {
+		rows, readErr := choices()
+		if readErr != nil {
+			return "", readErr
+		}
+		for _, row := range rows {
+			if row.Label == backChoice.Label {
+				return row.Key, nil
+			}
+		}
+	}
 	if errors.Is(err, io.EOF) {
 		return "", ErrInterrupted
 	}

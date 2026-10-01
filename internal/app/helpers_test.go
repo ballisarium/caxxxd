@@ -206,6 +206,7 @@ const (
 type answer struct {
 	kind  answerKind
 	value string
+	err   error
 }
 
 // text answers a text prompt. An empty value accepts whatever the prompt
@@ -266,6 +267,9 @@ func (s *scriptPrompter) Text(question, _, initial string) (string, error) {
 	if !ok {
 		return "", app.ErrInterrupted
 	}
+	if reply.err != nil {
+		return "", reply.err
+	}
 	if reply.value == "" {
 		return initial, nil
 	}
@@ -295,6 +299,9 @@ func (s *scriptPrompter) Choose(question string, choices []app.Choice, _ int) (i
 	reply, ok := s.next(answerChoice, question)
 	if !ok {
 		return 0, app.ErrInterrupted
+	}
+	if reply.err != nil {
+		return 0, reply.err
 	}
 
 	for index, choice := range choices {

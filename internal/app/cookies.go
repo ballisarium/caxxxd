@@ -1,6 +1,10 @@
 package app
 
-import "github.com/ballisarium/caxxxd/internal/ytdlp"
+import (
+	"errors"
+
+	"github.com/ballisarium/caxxxd/internal/ytdlp"
+)
 
 func (a *App) configureCookies() error {
 	a.console.Panel("Browser cookies",
@@ -18,6 +22,9 @@ func (a *App) configureCookies() error {
 	}
 	choices = append(choices, Choice{Label: "Cancel", Detail: "keep the current setting"})
 	picked, err := a.prompt.Choose("Use cookies from", choices, initial)
+	if errors.Is(err, ErrBack) {
+		return nil
+	}
 	if err != nil {
 		return err
 	}

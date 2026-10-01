@@ -12,7 +12,6 @@ import (
 	"unicode"
 
 	"github.com/lithammer/fuzzysearch/fuzzy"
-	"golang.org/x/sys/unix"
 	"golang.org/x/term"
 )
 
@@ -99,7 +98,7 @@ func (c *Console) selectMenu(in *os.File, prompt string, provideItems func() ([]
 	selected, first, lines := menuIndexForID(matches, items, initialID, 0), 0, 0
 	query := ""
 	pasting := false
-	reader := bufio.NewReader(interruptReader{in})
+	reader := bufio.NewReader(newPromptReader(in))
 	needsDraw := true
 	for {
 		if needsDraw {
@@ -123,7 +122,7 @@ func (c *Console) selectMenu(in *os.File, prompt string, provideItems func() ([]
 				// Reserve the heading, description, controls and the final cursor
 				// line so redrawing a menu cannot scroll away the summary above it.
 				bodyRows := c.screenRows - lines
-				room := terminalRows - bodyRows - len(strings.Split(prompt, "\n")) - len(description) - 4
+				room := terminalRows - bodyRows - len(strings.Split(prompt, "\n")) - len(description) - 5
 				visibleHeight = min(visibleHeight, max(room, 1))
 			}
 			first = clamp(first, 0, max(len(matches)-visibleHeight, 0))
@@ -152,7 +151,7 @@ func (c *Console) selectMenu(in *os.File, prompt string, provideItems func() ([]
 				rows = append(rows, c.theme.Mist.Sprint("  No matches. Clear the filter."))
 			}
 			rows = append(rows, description...)
-			rows = append(rows, "", c.theme.Slate.Sprint("  ↑↓ Move  Enter Select  Ctrl+C Exit"))
+			rows = append(rows, "", c.theme.Slate.Sprint("  ↑↓ Move  Enter Select"), c.theme.Slate.Sprint("  Esc Back  Ctrl+C Exit"))
 			position := fmt.Sprintf("  %d/%d", selected+1, len(matches))
 			if len(matches) == 0 {
 				position = "  0 matches"
@@ -269,28 +268,7 @@ func menuIndexForID(matches fuzzy.Ranks, items []MenuItem, id string, fallback i
 // waitMenuInput bounds a live menu's idle wait without adding a reader
 // goroutine that could continue consuming terminal input after return.
 func waitMenuInput(in *os.File, reader *bufio.Reader) (bool, error) {
-	if reader.Buffered() > 0 {
-		return true, nil
-	}
-	fds := []unix.PollFd{{Fd: int32(in.Fd()), Events: unix.POLLIN}}
-	for {
-		ready, err := unix.Poll(fds, 250)
-		if err == unix.EINTR {
-			continue
-		}
-		if err != nil {
-			return false, err
-		}
-		if ready == 0 {
-			return false, nil
-		}
-		if fds[0].Revents&unix.POLLNVAL != 0 {
-			return false, os.ErrClosed
-		}
-		if fds[0].Revents&(unix.POLLIN|unix.POLLHUP|unix.POLLERR) != 0 {
-			return true, nil
-		}
-	}
+	return waitPromptInput(in, reader, 250)
 }
 
 // drawMenu keeps each row on one physical terminal line so a redraw erases

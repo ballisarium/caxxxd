@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -18,6 +19,9 @@ func (a *App) askSource() (stage, error) {
 		{Label: "Download history", Detail: "open or reveal completed files"},
 		quitChoice,
 	}, 0)
+	if errors.Is(err, ErrBack) {
+		return stageSource, nil
+	}
 	if err != nil {
 		return stageSource, err
 	}
@@ -50,75 +54,99 @@ func (a *App) showSources() (stage, error) {
 }
 
 func (a *App) askBrowserPage(ctx context.Context) (stage, error) {
-	page, err := a.prompt.Text("Web page URL", "Play the media in the browser. Leave blank to go back.", "")
-	if err != nil {
-		return stageBrowserPage, err
+	page := ""
+	for {
+		var err error
+		page, err = a.prompt.Text("Web page URL", "Play media in the browser. Blank goes back.", page)
+		if errors.Is(err, ErrBack) {
+			return stageSource, nil
+		}
+		if err != nil {
+			return stageBrowserPage, err
+		}
+		page = strings.TrimSpace(page)
+		if page == "" {
+			return stageSource, nil
+		}
+		if !browser.ValidURL(page) {
+			a.carry("Invalid page URL", "Use an http:// or https:// URL without embedded credentials.")
+			return stageBrowserPage, nil
+		}
+		open, err := a.askCaptureBrowser()
+		if errors.Is(err, ErrBack) {
+			a.screen(stageBrowserPage)
+			continue
+		}
+		if err != nil {
+			return stageBrowserPage, err
+		}
+		spinner := a.console.Spinner("Opening the capture browser")
+		defer spinner.Stop()
+		if interrupted(ctx, func(runCtx context.Context) {
+			a.capture, err = open(runCtx, page)
+		}) {
+			return stageSource, errQuit
+		}
+		if err != nil {
+			spinner.Fail("Browser capture could not start")
+			a.carry("Browser capture unavailable", err.Error())
+			return stageSource, nil
+		}
+		spinner.Done("Browser capture is ready")
+		a.capture = newManagedCapture(a.capture)
+		a.captureCursor = ""
+		a.url = ""
+		if !a.sectionFixed {
+			a.options.Section = nil
+		}
+		return stageCapture, nil
 	}
-	page = strings.TrimSpace(page)
-	if page == "" {
-		return stageSource, nil
-	}
-	if !browser.ValidURL(page) {
-		a.carry("Invalid page URL", "Use an http:// or https:// URL without embedded credentials.")
-		return stageBrowserPage, nil
-	}
-	mode, err := a.prompt.Choose("Capture browser", []Choice{
-		{Label: "Separate browser", Detail: "Chrome, Chromium, or Edge · sign in there if needed"},
-		{Label: "My running Chrome", Detail: "existing profile · requires remote debugging"},
-		{Label: "Chrome debugging port", Detail: "connect to a browser you started with a debug port"},
-		backChoice,
-	}, 0)
-	if err != nil {
-		return stageBrowserPage, err
-	}
-	if mode == 3 {
-		return stageBrowserPage, nil
-	}
-	open := a.options.OpenBrowser
-	if mode == 1 || mode == 2 {
-		port := 0
-		if mode == 2 {
-			value, askErr := a.prompt.Text("Chrome debug port", "Enter the loopback port of your running capture browser. Leave blank to go back.", "")
-			if askErr != nil {
-				return stageBrowserPage, askErr
+}
+
+// askCaptureBrowser keeps a canceled port edit inside the browser selection.
+func (a *App) askCaptureBrowser() (func(context.Context, string) (browser.Capture, error), error) {
+	for {
+		mode, err := a.prompt.Choose("Capture browser", []Choice{
+			{Label: "Separate browser", Detail: "Chrome, Chromium, or Edge · sign in there if needed"},
+			{Label: "My running Chrome", Detail: "existing profile · requires remote debugging"},
+			{Label: "Chrome debugging port", Detail: "connect to a browser you started with a debug port"},
+			backChoice,
+		}, 0)
+		if err != nil {
+			return nil, err
+		}
+		if mode == 3 {
+			return nil, ErrBack
+		}
+		open := a.options.OpenBrowser
+		if mode == 1 || mode == 2 {
+			port := 0
+			if mode == 2 {
+				value, askErr := a.prompt.Text("Chrome debug port", "Enter the loopback port of your running capture browser. Leave blank to go back.", "")
+				if errors.Is(askErr, ErrBack) || (askErr == nil && strings.TrimSpace(value) == "") {
+					a.screen(stageBrowserPage)
+					continue
+				}
+				if askErr != nil {
+					return nil, askErr
+				}
+				port, err = strconv.Atoi(strings.TrimSpace(value))
+				if err != nil || port < 1 || port > 65535 {
+					a.carry("Invalid browser port", "Use a port between 1 and 65535.")
+					a.screen(stageBrowserPage)
+					continue
+				}
 			}
-			if strings.TrimSpace(value) == "" {
-				return stageBrowserPage, nil
+			if mode == 1 {
+				a.console.Hint("In Chrome, enable chrome://inspect/#remote-debugging and allow the connection.")
 			}
-			port, err = strconv.Atoi(strings.TrimSpace(value))
-			if err != nil || port < 1 || port > 65535 {
-				a.carry("Invalid browser port", "Use a port between 1 and 65535.")
-				return stageBrowserPage, nil
+			a.console.Hint("Capture opens a new tab. Your other tabs stay outside this scan.")
+			open = func(ctx context.Context, page string) (browser.Capture, error) {
+				return a.options.ConnectBrowser(ctx, page, port)
 			}
 		}
-		if mode == 1 {
-			a.console.Hint("In Chrome, enable chrome://inspect/#remote-debugging and allow the connection.")
-		}
-		a.console.Hint("Capture opens a new tab. Your other tabs stay outside this scan.")
-		open = func(ctx context.Context, page string) (browser.Capture, error) {
-			return a.options.ConnectBrowser(ctx, page, port)
-		}
+		return open, nil
 	}
-	spinner := a.console.Spinner("Opening the capture browser")
-	defer spinner.Stop()
-	if interrupted(ctx, func(runCtx context.Context) {
-		a.capture, err = open(runCtx, page)
-	}) {
-		return stageSource, errQuit
-	}
-	if err != nil {
-		spinner.Fail("Browser capture could not start")
-		a.carry("Browser capture unavailable", err.Error())
-		return stageSource, nil
-	}
-	spinner.Done("Browser capture is ready")
-	a.capture = newManagedCapture(a.capture)
-	a.captureCursor = ""
-	a.url = ""
-	if !a.sectionFixed {
-		a.options.Section = nil
-	}
-	return stageCapture, nil
 }
 
 func (a *App) askCapture(ctx context.Context) (stage, error) {

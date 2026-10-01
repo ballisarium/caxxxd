@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"path/filepath"
@@ -175,9 +176,13 @@ func (a *App) askLink(ctx context.Context) (stage, error) {
 
 	typed, err := a.prompt.Text(
 		"Paste a media URL",
-		"One media item per link. Playlists are not supported.",
+		"One item per link. Blank goes back.",
 		prefill,
 	)
+	if errors.Is(err, ErrBack) {
+		a.resetForNextDownload()
+		return stageSource, nil
+	}
 	if err != nil {
 		return stageLink, err
 	}
@@ -185,8 +190,8 @@ func (a *App) askLink(ctx context.Context) (stage, error) {
 
 	value := strings.TrimSpace(typed)
 	if value == "" {
-		a.carry("Nothing to download", "A media URL is what caxxxd starts from.")
-		return stageLink, nil
+		a.resetForNextDownload()
+		return stageSource, nil
 	}
 
 	a.url = value
@@ -402,6 +407,9 @@ func (a *App) askRangeStart() (stage, error) {
 		"Seconds: 90 · Timecode: 1:30 or 0:01:30 · Beginning: 0",
 		initial,
 	)
+	if errors.Is(err, ErrBack) {
+		return stageRange, nil
+	}
 	if err != nil {
 		return stageRangeStart, err
 	}
@@ -427,6 +435,9 @@ func (a *App) askRangeEnd() (stage, error) {
 		initial = ui.FormatDuration(float64(a.rangeDraft.End))
 	}
 	typed, err := a.prompt.Text("End at", "Use a position in the video, not a duration: 120 or 2:00.", initial)
+	if errors.Is(err, ErrBack) {
+		return stageRangeStart, nil
+	}
 	if err != nil {
 		return stageRangeEnd, err
 	}
@@ -455,6 +466,9 @@ func (a *App) confirmRange() (stage, error) {
 		{Label: "Change end", Detail: "choose a different ending"},
 		{Label: "Cancel changes", Detail: "keep the previous selection"},
 	}, 0)
+	if errors.Is(err, ErrBack) {
+		picked, err = 3, nil
+	}
 	if err != nil {
 		return stageRangeConfirm, err
 	}
@@ -674,6 +688,9 @@ func (a *App) confirmLossyConversion(format domain.AudioFormat) (bool, error) {
 		{Label: "Yes, use " + name, Detail: "I know what it costs"},
 		{Label: "No, choose another format", Detail: "go back to the list"},
 	}, 1)
+	if errors.Is(err, ErrBack) {
+		return false, nil
+	}
 	return picked == 0, err
 }
 
@@ -889,6 +906,9 @@ func (a *App) askDestination() error {
 		"A full path, for example ~/Movies.",
 		collapseHome(a.outputDir, a.options.Home),
 	)
+	if errors.Is(err, ErrBack) {
+		return nil
+	}
 	if err != nil {
 		return err
 	}

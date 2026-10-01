@@ -56,3 +56,18 @@ func TestCookiePreferenceCanBeEnabledAndDisabled(t *testing.T) {
 		t.Fatal("browser cookies were not disabled")
 	}
 }
+
+func TestCancelingCookieConfigurationPreservesTheCurrentBrowser(t *testing.T) {
+	first := newSession(t, script(pick("firefox")), func(o *app.Options) {
+		o.ConfigureCookies = true
+	}).run()
+	second := newSession(t, script(answer{kind: answerChoice, err: app.ErrBack}), func(o *app.Options) {
+		o.ConfigureCookies = true
+		o.ConfigStore = first.store
+	}).run()
+	second.requireScripted()
+	stored, err := first.store.Load()
+	if second.err != nil || err != nil || stored.CookieBrowser != "firefox" {
+		t.Fatal("canceling cookie configuration changed the remembered browser")
+	}
+}

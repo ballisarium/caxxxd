@@ -36,7 +36,9 @@ whole item or a clip, pick video, audio, or subtitles, then review and download.
 the destination folder is remembered. passing a URL on the command line goes
 straight to the media URL prompt.
 
-use the arrow keys and Enter to choose; Ctrl+C exits. long lists support
+use the arrow keys and Enter to choose; Esc goes back and Ctrl+C exits.
+Esc cancels a URL, folder, browser port, or clip edit without applying it.
+an empty media URL also returns to the opening menu. long lists support
 typing to filter and Ctrl+U to clear the filter. the menu shows your position
 and scrolls to fit the window. when a row is shortened, its selected description
 appears below the list. the interface supports terminals from 40 columns wide.

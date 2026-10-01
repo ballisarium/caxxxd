@@ -491,6 +491,10 @@ func (a *App) reportSuccess() (stage, error) {
 		}
 		choices = append(choices, quitChoice)
 		picked, err := a.prompt.Choose("What now?", choices, 0)
+		if errors.Is(err, ErrBack) {
+			a.resetForNextDownload()
+			return stageSource, nil
+		}
 		if err != nil {
 			return stageLink, err
 		}
@@ -581,6 +585,11 @@ func (a *App) reportFailure(failure Failure, ways ...recovery) (stage, error) {
 		)
 
 		picked, err := a.prompt.Choose("What now?", choices, 0)
+		if errors.Is(err, ErrBack) {
+			a.queueRunning = false
+			a.resetForNextDownload()
+			return stageSource, nil
+		}
 		if err != nil {
 			return fallback, err
 		}

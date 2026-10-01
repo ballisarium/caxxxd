@@ -43,12 +43,12 @@ func (c *Console) ReadLine(in *os.File, prompt, initial string) (string, error) 
 
 	// Said here rather than by the caller: these keys exist because the editor
 	// below is running, and only while it is.
-	c.Hint("Ctrl+C quits. Ctrl+U clears the line; Ctrl+W deletes a word.")
+	c.Hint("Esc back. Ctrl+C exits. Ctrl+U clears.")
 
 	editor := term.NewTerminal(readWriter{
 		// The prefill is fed in ahead of the keyboard, which is what makes it
 		// an editable answer rather than a label the user has to retype.
-		reader: io.MultiReader(strings.NewReader(initial), interruptReader{in}),
+		reader: io.MultiReader(strings.NewReader(initial), newPromptReader(in)),
 		writer: c.out,
 	}, prompt)
 
