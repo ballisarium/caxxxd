@@ -112,8 +112,17 @@ func TestLiveCaptureDownloadsFromEmbeddedPlayer(t *testing.T) {
 		}
 		return hls == 2 && dash == 1
 	}
+	playbackMetadataReady := func() bool {
+		count := 0
+		for _, candidate := range capture.Candidates() {
+			if candidate.Kind == "MP4" && candidate.Height == 90 && candidate.Width == 160 && candidate.Duration >= 2 && candidate.Source != "" {
+				count++
+			}
+		}
+		return count >= 2
+	}
 	for len(capture.Candidates()) < 7 {
-		if !openedPopup && len(capture.Candidates()) >= 6 && estimatesReady() {
+		if !openedPopup && len(capture.Candidates()) >= 6 && estimatesReady() && playbackMetadataReady() {
 			if err := session.conn.call(ctx, session.rootSession, "Runtime.evaluate", map[string]any{"expression": "window.open('/popup'); location.href='/advert'", "userGesture": true}, nil); err != nil {
 				t.Fatal(err)
 			}
@@ -121,7 +130,7 @@ func TestLiveCaptureDownloadsFromEmbeddedPlayer(t *testing.T) {
 		}
 		select {
 		case <-deadline.C:
-			t.Fatalf("no media captured: player=%d media=%d popup=%d missing-cookie=%d missing-referer=%d estimates=%t", players.Load(), media.Load(), popup.Load(), missingCookie.Load(), missingReferer.Load(), estimatesReady())
+			t.Fatalf("capture incomplete: player=%d media=%d popup=%d missing-cookie=%d missing-referer=%d estimates=%t playback-metadata=%t", players.Load(), media.Load(), popup.Load(), missingCookie.Load(), missingReferer.Load(), estimatesReady(), playbackMetadataReady())
 		case <-ctx.Done():
 			t.Fatal(ctx.Err())
 		case <-tick.C:

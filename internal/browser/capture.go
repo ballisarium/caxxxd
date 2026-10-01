@@ -19,6 +19,7 @@ import (
 type request struct {
 	referer, origin, agent string
 	url                    string
+	source                 string
 }
 
 type resource struct {
@@ -87,8 +88,9 @@ func (s *Session) event(msg packet) {
 		}()
 	case "Network.requestWillBeSent":
 		var p struct {
-			RequestID string `json:"requestId"`
-			Request   struct {
+			RequestID   string `json:"requestId"`
+			DocumentURL string `json:"documentURL"`
+			Request     struct {
 				Headers map[string]string `json:"headers"`
 				URL     string            `json:"url"`
 			} `json:"request"`
@@ -98,6 +100,9 @@ func (s *Session) event(msg packet) {
 		}
 		r := request{}
 		r.url = p.Request.URL
+		if page, err := url.Parse(p.DocumentURL); err == nil {
+			r.source = page.Hostname()
+		}
 		for key, value := range p.Request.Headers {
 			switch strings.ToLower(key) {
 			case "referer":
@@ -142,6 +147,21 @@ func (s *Session) event(msg packet) {
 			item := &s.items[i]
 			if item.url == p.Response.URL {
 				item.session = msg.SessionID
+				if s.sources == nil {
+					s.sources = make(map[string]int)
+				}
+				if s.sources[msg.SessionID] == 0 {
+					s.sources[msg.SessionID] = len(s.sources) + 1
+				}
+				if r.source == "" {
+					if page, err := url.Parse(r.referer); err == nil {
+						r.source = page.Hostname()
+					}
+				}
+				item.Source = fmt.Sprintf("player %d", s.sources[msg.SessionID])
+				if r.source != "" {
+					item.Source += " · " + r.source
+				}
 			}
 			if item.url == p.Response.URL && item.Kind != "HLS" && item.Kind != "DASH" {
 				if size := responseSize(p.Response.Status, p.Response.Headers); size > 0 {
@@ -195,19 +215,51 @@ func (s *Session) readManifest(conn *connection, session, requestID, rawURL, kin
 		s.manifests = make(map[string]manifestEstimate)
 	}
 	s.manifests[rawURL] = parsed
+	s.applyManifestMetadata()
+}
+
+// Caller holds s.mu; recompute relationships after either parent or child arrives.
+func (s *Session) applyManifestMetadata() {
 	for i := range s.items {
 		item := &s.items[i]
+		if item.Kind == "HLS" || item.Kind == "DASH" {
+			item.Group, item.Codecs = "", ""
+			item.Duration, item.Width, item.Height, item.Bitrate = 0, 0, 0, 0
+			item.Size, item.Approximate = 0, false
+		}
 		manifest, ok := s.manifests[item.url]
 		if !ok {
 			continue
 		}
 		item.Size, item.Approximate = manifest.Bytes, !manifest.Exact
+		if manifest.DurationSeconds > 0 {
+			item.Duration = manifest.DurationSeconds
+		}
+		if manifest.Height > 0 {
+			item.Width, item.Height = manifest.Width, manifest.Height
+		}
+		if manifest.Codecs != "" {
+			item.Codecs = manifest.Codecs
+		}
 	}
 	for i := range s.items {
 		item := &s.items[i]
 		manifest := s.manifests[item.url]
 		for _, variant := range manifest.Variants {
 			child := s.manifests[variant.URL]
+			if variant.Height > item.Height {
+				item.Width, item.Height, item.Codecs, item.Bitrate = variant.Width, variant.Height, variant.Codecs, variant.Bandwidth
+			}
+			for j := range s.items {
+				if s.items[j].url == variant.URL {
+					group := fmt.Sprintf("hls:%d", item.ID)
+					item.Group, s.items[j].Group = group, group
+					s.items[j].Width, s.items[j].Height, s.items[j].Codecs, s.items[j].Bitrate = variant.Width, variant.Height, variant.Codecs, variant.Bandwidth
+				}
+			}
+			if child.DurationSeconds > item.Duration {
+				item.Duration = child.DurationSeconds
+			}
 			bytes := child.DurationSeconds * float64(variant.Bandwidth) / 8
 			if bytes > 0 && bytes < float64(1<<63) {
 				if int64(bytes) > item.Size {

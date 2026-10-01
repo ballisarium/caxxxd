@@ -3,12 +3,26 @@ package browser
 import (
 	"bufio"
 	"encoding/xml"
+	"fmt"
 	"math"
 	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
 )
+
+func cleanCodecs(value string) string {
+	if len(value) > 96 {
+		return ""
+	}
+	value = strings.ReplaceAll(value, " ", "")
+	for _, c := range value {
+		if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || strings.ContainsRune(".,_-", c)) {
+			return ""
+		}
+	}
+	return value
+}
 
 const (
 	maxManifestBodyBytes = 2 << 20
@@ -24,11 +38,15 @@ type manifestEstimate struct {
 	Bytes           int64
 	Exact           bool
 	Variants        []manifestVariant
+	Width, Height   int
+	Codecs          string
 }
 
 type manifestVariant struct {
-	URL       string
-	Bandwidth int64
+	URL           string
+	Bandwidth     int64
+	Width, Height int
+	Codecs        string
 }
 
 // manifestSize extracts finite duration, size, and variant information from a
@@ -137,7 +155,9 @@ func hlsManifestSize(rawURL, body string) manifestEstimate {
 					bandwidth = positiveInt64(pendingVariant["BANDWIDTH"])
 				}
 				if bandwidth > 0 {
-					result.Variants = append(result.Variants, manifestVariant{URL: variantURL, Bandwidth: bandwidth})
+					var width, height int
+					fmt.Sscanf(pendingVariant["RESOLUTION"], "%dx%d", &width, &height)
+					result.Variants = append(result.Variants, manifestVariant{URL: variantURL, Bandwidth: bandwidth, Width: width, Height: height, Codecs: cleanCodecs(pendingVariant["CODECS"])})
 					if len(result.Variants) > maxManifestVariants {
 						return manifestEstimate{}
 					}
@@ -284,6 +304,8 @@ type dashRepresentation struct {
 	ContentType string `xml:"contentType,attr"`
 	MIMEType    string `xml:"mimeType,attr"`
 	Codecs      string `xml:"codecs,attr"`
+	Width       int    `xml:"width,attr"`
+	Height      int    `xml:"height,attr"`
 }
 
 func dashManifestSize(body string) manifestEstimate {
@@ -322,6 +344,9 @@ func dashManifestSize(body string) manifestEstimate {
 				codecs := firstNonEmpty(representation.Codecs, adaptation.Codecs)
 				switch dashRepresentationKind(contentType, mimeType, codecs) {
 				case "video":
+					if representation.Height > result.Height {
+						result.Width, result.Height, result.Codecs = representation.Width, representation.Height, cleanCodecs(codecs)
+					}
 					if bandwidth > maxVideo {
 						maxVideo = bandwidth
 					}

@@ -5,13 +5,22 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"unicode"
 
 	"github.com/lithammer/fuzzysearch/fuzzy"
+	"golang.org/x/sys/unix"
 	"golang.org/x/term"
 )
+
+// MenuItem is one selectable entry in a menu that may update while open.
+type MenuItem struct {
+	ID    string
+	Label string
+}
 
 // Select reads keys as a stream, independently of terminal read boundaries.
 // Ctrl+C shares the line editor's interruption boundary, so neither a partial
@@ -20,10 +29,48 @@ func (c *Console) Select(in *os.File, prompt string, options []string, initial, 
 	if in == nil || len(options) == 0 {
 		return 0, io.EOF
 	}
+	items := make([]MenuItem, len(options))
+	for index, option := range options {
+		items[index] = MenuItem{ID: strconv.Itoa(index), Label: option}
+	}
+	initial = clamp(initial, 0, len(options)-1)
+	selected, err := c.selectMenu(in, prompt, func() ([]MenuItem, error) {
+		return items, nil
+	}, strconv.Itoa(initial), height, filter, false)
+	if err != nil {
+		return 0, err
+	}
+	index, err := strconv.Atoi(selected)
+	if err != nil {
+		return 0, err
+	}
+	return index, nil
+}
+
+// SelectLive redraws a menu as items change, retaining the selected item by
+// ID when the provider reorders or replaces entries. The provider is checked
+// while waiting for input, so returning from this method leaves no input
+// reader running in the background.
+func (c *Console) SelectLive(in *os.File, prompt string, items func() ([]MenuItem, error), initialID string, height int, filter bool) (string, error) {
+	if in == nil || items == nil {
+		return "", io.EOF
+	}
+	return c.selectMenu(in, prompt, items, initialID, height, filter, true)
+}
+
+func (c *Console) selectMenu(in *os.File, prompt string, provideItems func() ([]MenuItem, error), initialID string, height int, filter, live bool) (string, error) {
+	items, err := provideItems()
+	if err != nil {
+		return "", err
+	}
+	if len(items) == 0 {
+		return "", io.EOF
+	}
+	items = append([]MenuItem(nil), items...)
 	if term.IsTerminal(int(in.Fd())) {
 		state, err := term.MakeRaw(int(in.Fd()))
 		if err != nil {
-			return 0, err
+			return "", err
 		}
 		c.setRaw(true)
 		defer func() {
@@ -38,34 +85,67 @@ func (c *Console) Select(in *os.File, prompt string, options []string, initial, 
 		defer io.WriteString(c.out, "\x1b[?2004l")
 	}
 
-	height = max(1, min(height, len(options)))
-	matches := fuzzy.RankFindFold("", options)
-	selected, first, lines := clamp(initial, 0, len(options)-1), 0, 0
+	height = max(1, height)
+	matches := rankMenuItems("", items)
+	selected, first, lines := menuIndexForID(matches, items, initialID, 0), 0, 0
 	query := ""
 	pasting := false
 	reader := bufio.NewReader(interruptReader{in})
+	needsDraw := true
 	for {
-		first = max(0, min(first, selected))
-		if selected >= first+height {
-			first = selected - height + 1
-		}
-		rows := make([]string, 0, height)
-		for index := first; index < min(first+height, len(matches)); index++ {
-			prefix := "  "
-			if index == selected {
-				prefix = c.theme.OnKlein.Sprint("▶") + " "
+		if needsDraw {
+			visibleHeight := min(height, max(len(matches), 1))
+			first = clamp(first, 0, max(len(matches)-visibleHeight, 0))
+			if selected < first {
+				first = selected
 			}
-			rows = append(rows, prefix+matches[index].Target)
+			if selected >= first+visibleHeight {
+				first = selected - visibleHeight + 1
+			}
+			rows := make([]string, 0, visibleHeight)
+			for index := first; index < min(first+visibleHeight, len(matches)); index++ {
+				prefix := "  "
+				if index == selected {
+					prefix = c.theme.OnKlein.Sprint("▶") + " "
+				}
+				rows = append(rows, prefix+matches[index].Target)
+			}
+			heading := prompt + ":"
+			if filter {
+				heading = prompt + " [type to search]: " + query
+			}
+			lines = c.drawMenu(in, lines, heading, rows)
+			needsDraw = false
 		}
-		heading := prompt + ":"
-		if filter {
-			heading = prompt + " [type to search]: " + query
+
+		if live {
+			ready, err := waitMenuInput(in, reader)
+			if err != nil {
+				return "", err
+			}
+			if !ready {
+				updated, err := provideItems()
+				if err != nil {
+					return "", err
+				}
+				updated = append([]MenuItem(nil), updated...)
+				if !slices.Equal(items, updated) {
+					selectedID := ""
+					if len(matches) > 0 {
+						selectedID = items[matches[selected].OriginalIndex].ID
+					}
+					items = updated
+					matches = rankMenuItems(query, items)
+					selected = menuIndexForID(matches, items, selectedID, selected)
+					needsDraw = true
+				}
+				continue
+			}
 		}
-		lines = c.drawMenu(in, lines, heading, rows)
 
 		key, err := readMenuKey(reader)
 		if err != nil {
-			return 0, err
+			return "", err
 		}
 		if key == menuPasteStart || key == menuPasteEnd {
 			pasting = key == menuPasteStart
@@ -77,12 +157,12 @@ func (c *Console) Select(in *os.File, prompt string, options []string, initial, 
 		previous := query
 		switch key {
 		case '\x04':
-			return 0, io.EOF
+			return "", io.EOF
 		case '\r', '\n':
 			if len(matches) > 0 {
 				choice := matches[selected]
 				c.drawMenu(in, lines, prompt+": "+query, []string{"  " + c.theme.OnKlein.Sprint("▶") + " " + choice.Target})
-				return choice.OriginalIndex, nil
+				return items[choice.OriginalIndex].ID, nil
 			}
 		case menuUp, '\x10':
 			if len(matches) > 0 {
@@ -104,11 +184,60 @@ func (c *Console) Select(in *os.File, prompt string, options []string, initial, 
 			}
 		}
 		if query != previous {
-			matches = fuzzy.RankFindFold(query, options)
-			if len(matches) != len(options) {
-				sort.Sort(matches)
-			}
+			matches = rankMenuItems(query, items)
 			selected, first = 0, 0
+		}
+		needsDraw = true
+	}
+}
+
+func rankMenuItems(query string, items []MenuItem) fuzzy.Ranks {
+	labels := make([]string, len(items))
+	for index, item := range items {
+		labels[index] = item.Label
+	}
+	matches := fuzzy.RankFindFold(query, labels)
+	if len(matches) != len(items) {
+		sort.Sort(matches)
+	}
+	return matches
+}
+
+func menuIndexForID(matches fuzzy.Ranks, items []MenuItem, id string, fallback int) int {
+	if len(matches) == 0 {
+		return 0
+	}
+	for index, match := range matches {
+		if items[match.OriginalIndex].ID == id {
+			return index
+		}
+	}
+	return clamp(fallback, 0, len(matches)-1)
+}
+
+// waitMenuInput bounds a live menu's idle wait without adding a reader
+// goroutine that could continue consuming terminal input after return.
+func waitMenuInput(in *os.File, reader *bufio.Reader) (bool, error) {
+	if reader.Buffered() > 0 {
+		return true, nil
+	}
+	fds := []unix.PollFd{{Fd: int32(in.Fd()), Events: unix.POLLIN}}
+	for {
+		ready, err := unix.Poll(fds, 250)
+		if err == unix.EINTR {
+			continue
+		}
+		if err != nil {
+			return false, err
+		}
+		if ready == 0 {
+			return false, nil
+		}
+		if fds[0].Revents&unix.POLLNVAL != 0 {
+			return false, os.ErrClosed
+		}
+		if fds[0].Revents&(unix.POLLIN|unix.POLLHUP|unix.POLLERR) != 0 {
+			return true, nil
 		}
 	}
 }

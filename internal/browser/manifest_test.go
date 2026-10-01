@@ -62,7 +62,7 @@ https://cdn.example/low.m3u8
 		t.Fatalf("variants = %+v, want two variants", got.Variants)
 	}
 	want := []manifestVariant{
-		{URL: "https://media.example/watch/video/high.m3u8?quality=high", Bandwidth: 2100000},
+		{URL: "https://media.example/watch/video/high.m3u8?quality=high", Bandwidth: 2100000, Codecs: "avc1.4d401f,mp4a.40.2"},
 		{URL: "https://cdn.example/low.m3u8", Bandwidth: 900000},
 	}
 	for i := range want {

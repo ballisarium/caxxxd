@@ -16,11 +16,17 @@ import (
 
 // Candidate contains display metadata only, never the captured address.
 type Candidate struct {
-	Kind        string
-	Host        string
-	ID          int // Stable selection across sorting and later network responses.
-	Size        int64
-	Approximate bool
+	Kind          string
+	Host          string
+	ID            int // Stable selection across sorting and later network responses.
+	Size          int64
+	Approximate   bool
+	Group         string // Only explicit manifest relationships group resources.
+	Duration      float64
+	Width, Height int
+	Codecs        string
+	Bitrate       int64
+	Source        string // Page host only, never its private URL.
 }
 
 // Selection stays private to the download pipeline for the session lifetime.
@@ -49,22 +55,24 @@ type attached struct {
 }
 
 type Session struct {
-	mu          sync.Mutex
-	items       []resource
-	requests    map[string]request
-	cmd         *exec.Cmd
-	conn        *connection
-	directory   string
-	done        chan struct{}
-	ready       chan attached
-	once        sync.Once
-	closeErr    error
-	rootSession string
-	borrowed    bool
-	targets     map[string]bool
-	sessions    map[string]bool
-	manifests   map[string]manifestEstimate
-	failure     error
+	mu           sync.Mutex
+	items        []resource
+	requests     map[string]request
+	cmd          *exec.Cmd
+	conn         *connection
+	directory    string
+	done         chan struct{}
+	ready        chan attached
+	once         sync.Once
+	closeErr     error
+	rootSession  string
+	borrowed     bool
+	targets      map[string]bool
+	sessions     map[string]bool
+	manifests    map[string]manifestEstimate
+	failure      error
+	metadataOnce sync.Once
+	sources      map[string]int
 }
 
 func ValidURL(raw string) bool {
@@ -187,6 +195,7 @@ func (s *Session) openPage(ctx context.Context, pageURL string) error {
 				return errors.New("the browser could not open this page; check the address and connection")
 			}
 			s.rootSession = ready.session
+			s.startMetadataWatch()
 			return nil
 		}
 	}

@@ -8,6 +8,39 @@ import (
 	"testing"
 )
 
+func TestCaptureGroupsOnlyReferencedVariantsAndKeepsPublicMetadata(t *testing.T) {
+	s := &Session{manifests: map[string]manifestEstimate{}}
+	s.observe("https://media.example.test/master.m3u8", "application/vnd.apple.mpegurl", "", "", "")
+	s.observe("https://media.example.test/video.m3u8", "application/vnd.apple.mpegurl", "", "", "")
+	s.observe("https://media.example.test/advert.mp4", "video/mp4", "", "", "")
+	s.manifests[s.items[0].url] = manifestEstimate{Variants: []manifestVariant{{URL: s.items[1].url, Bandwidth: 800000, Width: 1920, Height: 1080, Codecs: "avc1,mp4a"}}}
+	s.manifests[s.items[1].url] = manifestEstimate{DurationSeconds: 120}
+	s.applyManifestMetadata()
+	items := s.Candidates()
+	if items[0].Group == "" || items[0].Group != items[1].Group || items[2].Group != "" {
+		t.Fatal("playlist references must group variants without folding in an unrelated advertisement")
+	}
+	if items[1].Duration != 120 || items[1].Height != 1080 || items[1].Codecs != "avc1,mp4a" {
+		t.Fatal("variant metadata was not propagated to the captured resource")
+	}
+}
+
+func TestCaptureRefreshRemovesObsoleteVariantMetadata(t *testing.T) {
+	s := &Session{manifests: map[string]manifestEstimate{}}
+	for _, name := range []string{"master", "high", "low"} {
+		s.observe("https://media.example.test/"+name+".m3u8", "application/vnd.apple.mpegurl", "", "", "")
+	}
+	s.manifests[s.items[0].url] = manifestEstimate{Variants: []manifestVariant{{URL: s.items[1].url, Width: 1920, Height: 1080, Bandwidth: 800000}, {URL: s.items[2].url, Width: 1280, Height: 720, Bandwidth: 400000}}}
+	s.manifests[s.items[1].url] = manifestEstimate{DurationSeconds: 120}
+	s.manifests[s.items[2].url] = manifestEstimate{DurationSeconds: 120}
+	s.applyManifestMetadata()
+	s.manifests[s.items[0].url] = manifestEstimate{Variants: []manifestVariant{{URL: s.items[2].url, Width: 1280, Height: 720, Bandwidth: 400000}}}
+	s.applyManifestMetadata()
+	if s.items[0].Height != 720 || s.items[0].Size != 6000000 || s.items[1].Group != "" || s.items[1].Height != 0 || s.items[0].Group != s.items[2].Group {
+		t.Fatal("refreshed manifest retained obsolete grouping, resolution, or size")
+	}
+}
+
 func TestCaptureUsesFullRangeSizeAndKeepsSelectionStable(t *testing.T) {
 	s := &Session{requests: make(map[string]request)}
 	for _, response := range []string{
