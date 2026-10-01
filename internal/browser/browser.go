@@ -1,4 +1,4 @@
-// Package browser discovers media through an isolated Chromium session.
+// Package browser discovers media through isolated or opted-in Chromium sessions.
 package browser
 
 import (
@@ -16,8 +16,11 @@ import (
 
 // Candidate contains display metadata only, never the captured address.
 type Candidate struct {
-	Kind string
-	Host string
+	Kind        string
+	Host        string
+	ID          int // Stable selection across sorting and later network responses.
+	Size        int64
+	Approximate bool
 }
 
 // Selection stays private to the download pipeline for the session lifetime.
@@ -34,9 +37,10 @@ type Capture interface {
 }
 
 type Launcher struct {
-	Binary   string
-	Headless bool // For opt-in local integration tests; normal use is visible.
-	TempDir  string
+	Binary    string
+	Headless  bool // For opt-in local integration tests; normal use is visible.
+	TempDir   string
+	DebugPort int // Explicit loopback port; zero discovers Chrome's opted-in endpoint.
 }
 
 type attached struct {
@@ -45,16 +49,22 @@ type attached struct {
 }
 
 type Session struct {
-	mu        sync.Mutex
-	items     []resource
-	requests  map[string]request
-	cmd       *exec.Cmd
-	conn      *connection
-	directory string
-	done      chan struct{}
-	ready     chan attached
-	once      sync.Once
-	closeErr  error
+	mu          sync.Mutex
+	items       []resource
+	requests    map[string]request
+	cmd         *exec.Cmd
+	conn        *connection
+	directory   string
+	done        chan struct{}
+	ready       chan attached
+	once        sync.Once
+	closeErr    error
+	rootSession string
+	borrowed    bool
+	targets     map[string]bool
+	sessions    map[string]bool
+	manifests   map[string]manifestEstimate
+	failure     error
 }
 
 func ValidURL(raw string) bool {
@@ -122,41 +132,62 @@ func (l Launcher) Start(ctx context.Context, pageURL string) (capture Capture, s
 		close(s.done)
 		s.conn.close()
 	}()
-	if err := s.conn.call(ctx, "", "Target.setAutoAttach", autoAttachParams(), nil); err != nil {
+	if err := s.openPage(ctx, pageURL); err != nil {
 		return nil, err
+	}
+	ok = true
+	return s, nil
+}
+
+func (s *Session) openPage(ctx context.Context, pageURL string) error {
+	if !s.borrowed {
+		if err := s.conn.call(ctx, "", "Target.setAutoAttach", autoAttachParams(), nil); err != nil {
+			return err
+		}
 	}
 	var target struct {
 		TargetID string `json:"targetId"`
 	}
 	if err := s.conn.call(ctx, "", "Target.createTarget", map[string]any{"url": "about:blank"}, &target); err != nil {
-		return nil, err
+		return err
+	}
+	if s.borrowed {
+		s.mu.Lock()
+		s.targets = map[string]bool{target.TargetID: true}
+		s.sessions = make(map[string]bool)
+		s.mu.Unlock()
+		// Pause new pages before their first network request. Unrelated targets
+		// are immediately resumed and detached without enabling Network.
+		if err := s.conn.call(ctx, "", "Target.setAutoAttach", autoAttachParams(), nil); err != nil {
+			return err
+		}
 	}
 	startup, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 	for {
 		select {
 		case <-startup.Done():
-			return nil, startup.Err()
+			return startup.Err()
 		case <-s.conn.done:
-			return nil, errClosed
+			return errClosed
 		case ready := <-s.ready:
 			if ready.target != target.TargetID {
 				continue
 			}
 			if ready.err != nil {
-				return nil, ready.err
+				return ready.err
 			}
 			var navigation struct {
 				ErrorText string `json:"errorText"`
 			}
 			if err := s.conn.call(ctx, ready.session, "Page.navigate", map[string]any{"url": pageURL}, &navigation); err != nil {
-				return nil, err
+				return err
 			}
 			if navigation.ErrorText != "" {
-				return nil, errors.New("the browser could not open this page; check the address and connection")
+				return errors.New("the browser could not open this page; check the address and connection")
 			}
-			ok = true
-			return s, nil
+			s.rootSession = ready.session
+			return nil
 		}
 	}
 }
@@ -180,6 +211,12 @@ func findBrowser() string {
 }
 
 func (s *Session) Err() error {
+	s.mu.Lock()
+	failure := s.failure
+	s.mu.Unlock()
+	if failure != nil {
+		return failure
+	}
 	select {
 	case <-s.conn.done:
 		return errClosed

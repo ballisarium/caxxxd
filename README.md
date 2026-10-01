@@ -47,23 +47,57 @@ caxxxd --help
 requires Google Chrome, Chromium, or Microsoft Edge in `/Applications`,
 `~/Applications`, or on `PATH`. no browser is installed automatically.
 
-1. choose **Web page · beta** and enter the page address.
-2. play the media in the separate browser window; sign in there if needed.
+1. choose **Web page · beta**, enter the page address, and choose a browser.
+2. play the media in the capture tab; sign in there if needed.
 3. return to the terminal and select **Refresh streams**.
 4. choose a captured resource, review the format, and download. keep the
-   browser open until the download finishes. **Back** closes the capture.
+   browser open until the download finishes. **Back** ends the capture.
 
 capture watches network responses, including embedded players and new tabs,
 for direct video/audio files, HLS playlists, and DASH manifests. individual
 stream fragments are excluded. the first 200 distinct resources are kept.
+capture continues if the page opens the player in a new tab and redirects the
+original tab to advertising. the list sorts known sizes from largest to
+smallest. direct files use HTTP `Content-Length` or the full `Content-Range`
+total, rather than the size of a downloaded range. HLS/DASH sizes use complete
+playlist byte ranges or duration and bitrate where available; `~` marks an
+estimate. a playlist's own text size is never shown as the video's size.
+unknown and live-stream totals remain **size unknown**. larger size is a useful
+clue, but does not establish which resource is the original video.
 discovery follows the approach of [cat-catch](https://github.com/xifangczy/cat-catch),
-implemented independently in Go using Chromium's DevTools pipe protocol;
+implemented independently in Go using Chromium's DevTools Protocol;
 cat-catch source code is not bundled.
 
-the browser uses a disposable profile, separate from your regular browser.
+**Separate browser** uses a disposable Chrome, Chromium, or Edge profile.
+**My running Chrome** connects to the existing Chrome profile and opens a new
+capture tab. first enable remote debugging in
+`chrome://inspect/#remote-debugging`, then allow Chrome's connection dialog.
+this requires a Chrome version that exposes the opted-in debugging endpoint;
+Chrome 144 introduced this flow, but some later versions do not publish the
+endpoint. caxxxd reports that condition rather than restarting your browser.
+see [Chrome's connection documentation](https://developer.chrome.com/blog/chrome-devtools-mcp-debug-your-browser-session).
+
+**Chrome debugging port** also connects to a browser you already started with
+a loopback remote-debugging port. enter its port in the terminal. modern Chrome
+requires a non-default profile for command-line remote debugging; for example:
+
+```bash
+"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
+  --remote-debugging-port=9222 \
+  --user-data-dir="$HOME/Library/Application Support/caxxxd-chrome"
+```
+
+this profile is managed by you and can keep your sign-in between runs. caxxxd
+only disconnects when capture ends: it leaves the browser, tabs, and profile
+open. connected capture watches its new tab and related players/popups, not
+unrelated existing tabs. endpoints must be on loopback. Safari does not expose
+a supported equivalent for capturing an ordinary open tab; its cookies can
+still be used through **Media URL** and `--cookies`.
+
 captured addresses stay out of the resource menu. request context and
-domain-scoped cookies are passed to yt-dlp through private temporary files,
-removed with the profile on normal exit or Ctrl+C. captured downloads use
+domain-scoped cookies are passed to yt-dlp through private
+temporary files, removed on normal exit or Ctrl+C. disposable profiles are
+also removed; connected browser profiles are retained. captured downloads use
 neutral filenames. a forced process kill or power loss can leave the temporary
 profile in the system temporary directory.
 
@@ -71,7 +105,9 @@ this does not guarantee every page: DRM, browser-only blobs without a reusable
 media URL, expiring links, partitioned cookies, and custom authorization headers
 may prevent downloads. play or refresh the page and select a fresh resource
 when a link expires. existing `--cookies` settings apply to **Media URL**;
-browser capture uses only its own session.
+browser capture uses the selected capture session.
+connected sessions export cookies only for the selected media address; a
+stream needing cookies on additional CDN hosts may need **Separate browser**.
 
 ### choose a clip
 

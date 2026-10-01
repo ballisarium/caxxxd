@@ -20,15 +20,35 @@ func TestOpeningMenuExplainsSourcesAndReturnsToDownload(t *testing.T) {
 	}
 }
 
+func TestRunningBrowserUsesConnectedSessionAndStableMediaID(t *testing.T) {
+	capture := &fakeCapture{items: []browser.Candidate{{Kind: "MP4", Host: "media.example.test", ID: 7, Size: 9000}}}
+	connected := false
+	s := newSession(t, script(pick("Web page"), text("https://example.test/player"), pick("My running Chrome"), pick("1 · MP4"), pick("‹ Back"), pick("‹ Back"), pick("Quit")), func(o *app.Options) {
+		o.ConnectBrowser = func(context.Context, string, int) (browser.Capture, error) { connected = true; return capture, nil }
+	})
+	s.prompter.autoSource, s.prompter.autoWholeVideo = false, false
+	s.run()
+	s.requireScripted()
+	if !connected || capture.selected != 7 || !capture.closed {
+		t.Fatal("running browser selection did not preserve media identity and cleanup")
+	}
+}
+
 type fakeCapture struct {
-	closed bool
-	err    error
+	closed   bool
+	err      error
+	items    []browser.Candidate
+	selected int
 }
 
 func (f *fakeCapture) Candidates() []browser.Candidate {
+	if f.items != nil {
+		return f.items
+	}
 	return []browser.Candidate{{Kind: "HLS", Host: "media.example.test"}}
 }
-func (f *fakeCapture) Prepare(context.Context, int) (browser.Selection, error) {
+func (f *fakeCapture) Prepare(_ context.Context, id int) (browser.Selection, error) {
+	f.selected = id
 	return browser.Selection{URL: "https://media.example.test/master.m3u8", ConfigFile: "/private/session/download.conf"}, nil
 }
 func (f *fakeCapture) Err() error   { return f.err }
@@ -38,7 +58,7 @@ func TestCapturedMediaUsesSameContextForMetadataAndDownload(t *testing.T) {
 	capture := &fakeCapture{}
 	runner := &cookieRunner{stubRunner: stubRunner{payload: fixture(t, "video.json")}}
 	s := newSession(t, script(
-		pick("Web page"), text("https://example.test/player"), pick("1 · HLS"),
+		pick("Web page"), text("https://example.test/player"), pick("Separate browser"), pick("1 · HLS"),
 		pick("Video"), pick("Best available"), pick("MKV"), pick("Download"), pick("Quit"),
 	), func(o *app.Options) {
 		o.Client.Runner = runner
@@ -58,7 +78,7 @@ func TestCapturedMediaUsesSameContextForMetadataAndDownload(t *testing.T) {
 
 func TestClosedCaptureReturnsToSourceMenu(t *testing.T) {
 	capture := &fakeCapture{err: errors.New("browser closed")}
-	s := newSession(t, script(pick("Web page"), text("https://example.test/player"), pick("Quit")), func(o *app.Options) {
+	s := newSession(t, script(pick("Web page"), text("https://example.test/player"), pick("Separate browser"), pick("Quit")), func(o *app.Options) {
 		o.OpenBrowser = func(context.Context, string) (browser.Capture, error) { return capture, nil }
 	})
 	s.prompter.autoSource = false
@@ -73,7 +93,7 @@ func TestClosedCaptureReturnsToSourceMenu(t *testing.T) {
 func TestBackFromCapturedMediaReturnsToTheStreamList(t *testing.T) {
 	capture := &fakeCapture{}
 	s := newSession(t, script(
-		pick("Web page"), text("https://example.test/player"), pick("1 · HLS"),
+		pick("Web page"), text("https://example.test/player"), pick("Separate browser"), pick("1 · HLS"),
 		pick("‹ Back"), pick("‹ Back"), pick("Quit"),
 	), func(o *app.Options) {
 		o.OpenBrowser = func(context.Context, string) (browser.Capture, error) { return capture, nil }

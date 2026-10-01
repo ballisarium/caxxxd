@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"os"
 	"sync"
 	"time"
 )
@@ -22,11 +21,11 @@ type packet struct {
 	Error     json.RawMessage `json:"error,omitempty"`
 }
 
-// Chrome's debugging pipe uses NUL-delimited JSON on inherited descriptors.
-// It exposes no listening port and requires no WebSocket dependency.
+// connection reads NUL-delimited CDP messages from Chrome's inherited pipe
+// or the WebSocket adapter used to connect to an existing browser.
 type connection struct {
-	in      *os.File
-	out     *os.File
+	in      io.ReadCloser
+	out     deadlineWriter
 	mu      sync.Mutex
 	writeMu sync.Mutex
 	next    int
@@ -36,7 +35,12 @@ type connection struct {
 	once    sync.Once
 }
 
-func newConnection(in, out *os.File, onEvent func(packet)) *connection {
+type deadlineWriter interface {
+	io.WriteCloser
+	SetWriteDeadline(time.Time) error
+}
+
+func newConnection(in io.ReadCloser, out deadlineWriter, onEvent func(packet)) *connection {
 	c := &connection{in: in, out: out, pending: make(map[int]chan packet), done: make(chan struct{}), onEvent: onEvent}
 	go c.read()
 	return c
@@ -110,6 +114,7 @@ func (c *connection) call(ctx context.Context, session, method string, params an
 	deadline, _ := ctx.Deadline()
 	_ = c.out.SetWriteDeadline(deadline)
 	_, err = c.out.Write(append(data, 0))
+	_ = c.out.SetWriteDeadline(time.Time{})
 	c.writeMu.Unlock()
 	if err != nil {
 		return errClosed

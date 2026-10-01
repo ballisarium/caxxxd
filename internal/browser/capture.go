@@ -3,6 +3,7 @@ package browser
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -10,18 +11,21 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 )
 
 type request struct {
 	referer, origin, agent string
+	url                    string
 }
 
 type resource struct {
 	Candidate
 	url string
 	request
+	session string
 }
 
 func autoAttachParams() map[string]any {
@@ -38,10 +42,26 @@ func (s *Session) event(msg packet) {
 			SessionID  string `json:"sessionId"`
 			TargetInfo struct {
 				TargetID string `json:"targetId"`
+				OpenerID string `json:"openerId"`
 			} `json:"targetInfo"`
 		}
 		if json.Unmarshal(msg.Params, &p) != nil {
 			return
+		}
+		if s.borrowed {
+			s.mu.Lock()
+			related := s.targets[p.TargetInfo.TargetID] || s.targets[p.TargetInfo.OpenerID] || s.sessions[msg.SessionID]
+			if !related {
+				s.mu.Unlock()
+				go func() {
+					_ = conn.call(context.Background(), p.SessionID, "Runtime.runIfWaitingForDebugger", map[string]any{}, nil)
+					_ = conn.call(context.Background(), "", "Target.detachFromTarget", map[string]any{"sessionId": p.SessionID}, nil)
+				}()
+				return
+			}
+			s.targets[p.TargetInfo.TargetID] = true
+			s.sessions[p.SessionID] = true
+			s.mu.Unlock()
 		}
 		go func() {
 			ctx := context.Background()
@@ -55,6 +75,11 @@ func (s *Session) event(msg packet) {
 			if err == nil {
 				err = resumeErr
 			}
+			if s.borrowed && err != nil {
+				s.mu.Lock()
+				s.failure = errors.New("could not capture a player tab; reopen browser capture")
+				s.mu.Unlock()
+			}
 			select {
 			case s.ready <- attached{p.TargetInfo.TargetID, p.SessionID, err}:
 			case <-conn.done:
@@ -65,12 +90,14 @@ func (s *Session) event(msg packet) {
 			RequestID string `json:"requestId"`
 			Request   struct {
 				Headers map[string]string `json:"headers"`
+				URL     string            `json:"url"`
 			} `json:"request"`
 		}
 		if json.Unmarshal(msg.Params, &p) != nil {
 			return
 		}
 		r := request{}
+		r.url = p.Request.URL
 		for key, value := range p.Request.Headers {
 			switch strings.ToLower(key) {
 			case "referer":
@@ -90,9 +117,10 @@ func (s *Session) event(msg packet) {
 		var p struct {
 			RequestID string `json:"requestId"`
 			Response  struct {
-				URL      string `json:"url"`
-				MimeType string `json:"mimeType"`
-				Status   int    `json:"status"`
+				URL      string         `json:"url"`
+				MimeType string         `json:"mimeType"`
+				Status   int            `json:"status"`
+				Headers  map[string]any `json:"headers"`
 			} `json:"response"`
 		}
 		if json.Unmarshal(msg.Params, &p) != nil || p.Response.Status < 200 || p.Response.Status >= 300 {
@@ -100,16 +128,100 @@ func (s *Session) event(msg packet) {
 		}
 		s.mu.Lock()
 		r := s.requests[msg.SessionID+":"+p.RequestID]
+		r.url = p.Response.URL
+		if s.requests == nil {
+			s.requests = make(map[string]request)
+		}
+		if len(s.requests) < 8192 {
+			s.requests[msg.SessionID+":"+p.RequestID] = r
+		}
 		s.mu.Unlock()
 		s.observe(p.Response.URL, p.Response.MimeType, r.referer, r.origin, r.agent)
+		s.mu.Lock()
+		for i := range s.items {
+			item := &s.items[i]
+			if item.url == p.Response.URL {
+				item.session = msg.SessionID
+			}
+			if item.url == p.Response.URL && item.Kind != "HLS" && item.Kind != "DASH" {
+				if size := responseSize(p.Response.Status, p.Response.Headers); size > 0 {
+					item.Size = size
+				}
+			}
+		}
+		s.mu.Unlock()
 	case "Network.loadingFinished", "Network.loadingFailed":
 		var p struct {
 			RequestID string `json:"requestId"`
 		}
 		if json.Unmarshal(msg.Params, &p) == nil {
 			s.mu.Lock()
+			r := s.requests[msg.SessionID+":"+p.RequestID]
+			kind := ""
+			for _, item := range s.items {
+				if item.url == r.url && (item.Kind == "HLS" || item.Kind == "DASH") {
+					kind = item.Kind
+					break
+				}
+			}
 			delete(s.requests, msg.SessionID+":"+p.RequestID)
 			s.mu.Unlock()
+			if kind != "" && msg.Method == "Network.loadingFinished" && conn != nil {
+				go s.readManifest(conn, msg.SessionID, p.RequestID, r.url, kind)
+			}
+		}
+	}
+}
+
+func (s *Session) readManifest(conn *connection, session, requestID, rawURL, kind string) {
+	var response struct {
+		Body   string `json:"body"`
+		Base64 bool   `json:"base64Encoded"`
+	}
+	if conn.call(context.Background(), session, "Network.getResponseBody", map[string]any{"requestId": requestID}, &response) != nil || len(response.Body) > 2<<20 {
+		return
+	}
+	if response.Base64 {
+		body, err := base64.StdEncoding.DecodeString(response.Body)
+		if err != nil {
+			return
+		}
+		response.Body = string(body)
+	}
+	parsed := manifestSize(rawURL, kind, response.Body)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.manifests == nil {
+		s.manifests = make(map[string]manifestEstimate)
+	}
+	s.manifests[rawURL] = parsed
+	for i := range s.items {
+		item := &s.items[i]
+		manifest, ok := s.manifests[item.url]
+		if !ok {
+			continue
+		}
+		item.Size, item.Approximate = manifest.Bytes, !manifest.Exact
+	}
+	for i := range s.items {
+		item := &s.items[i]
+		manifest := s.manifests[item.url]
+		for _, variant := range manifest.Variants {
+			child := s.manifests[variant.URL]
+			bytes := child.DurationSeconds * float64(variant.Bandwidth) / 8
+			if bytes > 0 && bytes < float64(1<<63) {
+				if int64(bytes) > item.Size {
+					item.Size = int64(bytes)
+					item.Approximate = true
+				}
+				for j := range s.items {
+					variantItem := &s.items[j]
+					if variantItem.url == variant.URL && !child.Exact && int64(bytes) > variantItem.Size {
+						variantItem.Size = int64(bytes)
+						variantItem.Approximate = true
+					}
+				}
+			}
 		}
 	}
 }
@@ -143,12 +255,12 @@ func (s *Session) observe(rawURL, mime, referer, origin, agent string) {
 	defer s.mu.Unlock()
 	for i := range s.items {
 		if s.items[i].url == rawURL {
-			s.items[i].request = request{referer, origin, agent}
+			s.items[i].request = request{referer: referer, origin: origin, agent: agent}
 			return
 		}
 	}
 	if len(s.items) < 200 {
-		s.items = append(s.items, resource{Candidate: Candidate{Kind: kind, Host: u.Hostname()}, url: rawURL, request: request{referer, origin, agent}})
+		s.items = append(s.items, resource{Candidate: Candidate{Kind: kind, Host: u.Hostname(), ID: len(s.items)}, url: rawURL, request: request{referer: referer, origin: origin, agent: agent}})
 	}
 }
 
@@ -159,7 +271,34 @@ func (s *Session) Candidates() []Candidate {
 	for i, item := range s.items {
 		items[i] = item.Candidate
 	}
+	sort.SliceStable(items, func(i, j int) bool { return items[i].Size > items[j].Size })
 	return items
+}
+
+func responseSize(status int, headers map[string]any) int64 {
+	value := func(name string) string {
+		for key, v := range headers {
+			if strings.EqualFold(key, name) {
+				return fmt.Sprint(v)
+			}
+		}
+		return ""
+	}
+	var raw string
+	if status == 206 {
+		rangeValue := value("content-range")
+		if !strings.HasPrefix(rangeValue, "bytes ") {
+			return 0
+		}
+		_, raw, _ = strings.Cut(rangeValue, "/")
+	} else if status == 200 && (value("content-encoding") == "" || value("content-encoding") == "identity") {
+		raw = value("content-length")
+	}
+	size, err := strconv.ParseInt(strings.TrimSpace(raw), 10, 64)
+	if err != nil || size < 0 {
+		return 0
+	}
+	return size
 }
 
 // Prepare transfers domain-scoped cookies and the request's actual Referer,
@@ -186,7 +325,11 @@ func (s *Session) Prepare(ctx context.Context, index int) (Selection, error) {
 			PartitionKeyOpaque bool            `json:"partitionKeyOpaque"`
 		} `json:"cookies"`
 	}
-	if err := s.conn.call(ctx, "", "Storage.getCookies", map[string]any{}, &jar); err != nil {
+	cookieSession, cookieMethod, cookieParams := "", "Storage.getCookies", map[string]any{}
+	if s.borrowed {
+		cookieSession, cookieMethod, cookieParams = item.session, "Network.getCookies", map[string]any{"urls": []string{item.url}}
+	}
+	if err := s.conn.call(ctx, cookieSession, cookieMethod, cookieParams, &jar); err != nil {
 		return Selection{}, err
 	}
 	var cookies strings.Builder

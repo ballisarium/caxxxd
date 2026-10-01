@@ -2,10 +2,31 @@ package browser
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
 )
+
+func TestCaptureUsesFullRangeSizeAndKeepsSelectionStable(t *testing.T) {
+	s := &Session{requests: make(map[string]request)}
+	for _, response := range []string{
+		`{"requestId":"small","response":{"url":"https://media.example.test/small.mp4","mimeType":"video/mp4","status":200,"headers":{"Content-Length":"100"}}}`,
+		`{"requestId":"large","response":{"url":"https://media.example.test/large.mp4","mimeType":"video/mp4","status":206,"headers":{"content-length":"10","content-range":"bytes 0-9/9000"}}}`,
+		`{"requestId":"playlist","response":{"url":"https://media.example.test/master.m3u8","mimeType":"application/vnd.apple.mpegurl","status":200,"headers":{"Content-Length":"40"}}}`,
+		`{"requestId":"overflow","response":{"url":"https://media.example.test/overflow.mp4","mimeType":"video/mp4","status":200,"headers":{"Content-Length":"900000000000000000000000"}}}`,
+	} {
+		s.event(packet{Method: "Network.responseReceived", Params: json.RawMessage(response)})
+	}
+	items := s.Candidates()
+	if len(items) != 4 || items[0].Host != "media.example.test" {
+		t.Fatal("media candidates missing")
+	}
+	// The full resource total, not the fetched range or playlist text, orders files.
+	if items[0].Kind != "MP4" || items[0].Size != 9000 || items[0].ID != 1 || items[1].Size != 100 || items[2].Size != 0 || items[3].Size != 0 {
+		t.Fatal("expected full file sizes in descending order with stable selection IDs")
+	}
+}
 
 func TestCaptureKeepsPlayableResourcesAndHidesAddresses(t *testing.T) {
 	s := &Session{}

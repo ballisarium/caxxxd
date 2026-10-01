@@ -56,6 +56,7 @@ type TranscriptConverter interface {
 // in with the real implementation, so tests inject only what they care about.
 type Options struct {
 	OpenBrowser         func(context.Context, string) (browser.Capture, error)
+	ConnectBrowser      func(context.Context, string, int) (browser.Capture, error)
 	ConfigureCookies    bool
 	InitialURL          string
 	Section             *domain.TimeRange
@@ -173,6 +174,11 @@ func New(options Options) *App {
 func withDefaults(options Options) Options {
 	if options.OpenBrowser == nil {
 		options.OpenBrowser = browser.Launcher{}.Start
+	}
+	if options.ConnectBrowser == nil {
+		options.ConnectBrowser = func(ctx context.Context, page string, port int) (browser.Capture, error) {
+			return (browser.Launcher{DebugPort: port}).Connect(ctx, page)
+		}
 	}
 	if options.Checker.LookPath == nil || options.Checker.Version == nil {
 		options.Checker = deps.NewChecker()
