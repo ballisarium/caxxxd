@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"github.com/ballisarium/caxxxd/internal/browser"
-	"github.com/ballisarium/caxxxd/internal/ui"
 )
 
 func (a *App) askSource() (stage, error) {
@@ -15,6 +14,8 @@ func (a *App) askSource() (stage, error) {
 		{Label: "Media URL", Detail: "a supported site or a direct media link"},
 		{Label: "Web page · beta", Detail: "find media playing in a browser"},
 		{Label: "Supported sources", Detail: "where caxxxd can download from"},
+		{Label: fmt.Sprintf("Queue · %d", len(a.queue)), Detail: "download your reviewed selections in order"},
+		{Label: "Download history", Detail: "open or reveal completed files"},
 		quitChoice,
 	}, 0)
 	if err != nil {
@@ -27,6 +28,10 @@ func (a *App) askSource() (stage, error) {
 		return stageBrowserPage, nil
 	case 2:
 		return stageSources, nil
+	case 3:
+		return stageQueue, nil
+	case 4:
+		return stageHistory, nil
 	default:
 		return stageSource, errQuit
 	}
@@ -107,6 +112,8 @@ func (a *App) askBrowserPage(ctx context.Context) (stage, error) {
 		return stageSource, nil
 	}
 	spinner.Done("Browser capture is ready")
+	a.capture = newManagedCapture(a.capture)
+	a.captureCursor = ""
 	a.url = ""
 	if !a.sectionFixed {
 		a.options.Section = nil
@@ -123,7 +130,7 @@ func (a *App) askCapture(ctx context.Context) (stage, error) {
 		}
 		return stageSource, nil
 	}
-	a.console.Hint("Play media in the browser, then refresh this list.")
+	a.console.Hint("Play media in the browser. This list updates automatically.")
 	a.console.Hint("Keep the browser open until the download finishes.")
 	items := a.capture.Candidates()
 	if len(items) > 0 {
@@ -132,26 +139,25 @@ func (a *App) askCapture(ctx context.Context) (stage, error) {
 	if len(items) == 200 {
 		a.console.Hint("Showing the first 200 resources. Reopen capture to scan a different page.")
 	}
-	choices := make([]Choice, 0, len(items)+2)
-	for i, item := range items {
-		size := "size unknown"
-		if item.Size > 0 {
-			size = ui.FormatSize(item.Size, item.Approximate)
-		}
-		choices = append(choices, Choice{Label: fmt.Sprintf("%d · %s", i+1, item.Kind), Detail: size + " · " + item.Host})
-	}
 	if len(items) == 0 {
 		a.console.Hint("No media captured yet. Start playback or open the embedded player.")
 	}
-	choices = append(choices, Choice{Label: "Refresh streams", Detail: "include new browser requests"}, backChoice)
-	picked, err := a.prompt.Choose("Captured media", choices, 0)
+	picked, err := a.chooseCapture(ctx)
 	if err != nil {
+		if a.capture.Err() != nil {
+			cleanupErr := a.closeCapture()
+			a.carry("Browser capture ended", "Reopen capture to select media again.")
+			if cleanupErr != nil {
+				a.carry("Browser cleanup failed", cleanupErr.Error())
+			}
+			return stageSource, nil
+		}
 		return stageCapture, err
 	}
-	if picked == len(items) {
+	if picked == -1 {
 		return stageCapture, nil
 	}
-	if picked == len(items)+1 {
+	if picked == -2 {
 		if err := a.closeCapture(); err != nil {
 			a.carry("Browser cleanup failed", err.Error())
 		}
@@ -159,7 +165,7 @@ func (a *App) askCapture(ctx context.Context) (stage, error) {
 	}
 	var selected browser.Selection
 	if interrupted(ctx, func(runCtx context.Context) {
-		selected, err = a.capture.Prepare(runCtx, items[picked].ID)
+		selected, err = a.capture.Prepare(runCtx, picked)
 	}) {
 		return stageCapture, errQuit
 	}
@@ -168,6 +174,7 @@ func (a *App) askCapture(ctx context.Context) (stage, error) {
 		return stageCapture, nil
 	}
 	a.url, a.captureConfig = selected.URL, selected.ConfigFile
+	a.captureID = picked
 	if !a.sectionFixed {
 		a.options.Section = nil
 	}

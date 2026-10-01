@@ -49,9 +49,10 @@ requires Google Chrome, Chromium, or Microsoft Edge in `/Applications`,
 
 1. choose **Web page · beta**, enter the page address, and choose a browser.
 2. play the media in the capture tab; sign in there if needed.
-3. return to the terminal and select **Refresh streams**.
+3. return to the terminal; the captured list updates automatically.
 4. choose a captured resource, review the format, and download. keep the
-   browser open until the download finishes. **Back** ends the capture.
+   browser open until the download finishes. **Back** leaves the capture list;
+   a browser needed by queued downloads stays connected until they finish.
 
 capture watches network responses, including embedded players and new tabs,
 for direct video/audio files, HLS playlists, and DASH manifests. individual
@@ -64,6 +65,12 @@ playlist byte ranges or duration and bitrate where available; `~` marks an
 estimate. a playlist's own text size is never shown as the video's size.
 unknown and live-stream totals remain **size unknown**. larger size is a useful
 clue, but does not establish which resource is the original video.
+the list also shows resolution, duration, codecs, and the player/source host
+when available. playback properties come from captured players, including
+embedded frames; codecs come from manifests. variants explicitly referenced
+by the same HLS master are grouped, with a second menu to select a stream.
+unrelated resources are kept separate. updates preserve the selected row
+while new resources arrive or sizes change. type to filter the list.
 discovery follows the approach of [cat-catch](https://github.com/xifangczy/cat-catch),
 implemented independently in Go using Chromium's DevTools Protocol;
 cat-catch source code is not bundled.
@@ -108,6 +115,28 @@ when a link expires. existing `--cookies` settings apply to **Media URL**;
 browser capture uses the selected capture session.
 connected sessions export cookies only for the selected media address; a
 stream needing cookies on additional CDN hosts may need **Separate browser**.
+
+### queue, history, and recovery
+
+choose **Add to queue** on the review screen to save that selection. add more
+links or captured streams, then choose **Queue** in the opening menu and
+**Start queue**. downloads run in order using each item's reviewed format,
+folder, and time range. you can inspect or remove waiting items. a failure
+pauses for recovery; remaining items stay available. cancelling returns to
+the review, where the same download can be resumed. the queue is held only
+in memory and is discarded when caxxxd exits; source addresses are not saved.
+
+**Download history** lists the last 100 verified local outputs, newest first.
+open a file, show it in Finder, or repeat its format and folder settings with
+a new URL. missing files remain marked **unavailable**. history is stored in
+private `history.json` beside the preferences; it contains local paths and
+format choices, without source addresses or cookies.
+
+partial media downloads use `.part` files and resume where supported by
+yt-dlp. HTTP and fragment failures receive up to five retries with a bounded
+delay. unavailable fragments still fail the download. **Recapture stream**
+returns a failed browser download to the captured list: play or reload the
+page and choose a fresh resource if the old address has expired.
 
 ### choose a clip
 
@@ -161,8 +190,8 @@ and selecting a signed-in browser. cookies cannot guarantee access to every item
 - completion requires a nonempty output file, not just a successful tool exit.
 - missing HLS/DASH fragments fail the download instead of silently leaving gaps.
 
-one item at a time, with no playlists or DRM bypass. an interactive terminal is
-required. download only media you are authorised to save.
+one item per link, with sequential queues and no playlists or DRM bypass. an
+interactive terminal is required. download only media you are authorised to save.
 
 ## build and check
 

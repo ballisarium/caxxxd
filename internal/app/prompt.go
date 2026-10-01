@@ -106,6 +106,32 @@ func (p TerminalPrompter) Choose(question string, choices []Choice, initial int)
 	return selected, err
 }
 
+func (p TerminalPrompter) ChooseLive(question string, choices func() ([]LiveChoice, error), initial string) (string, error) {
+	p.console.Hint("↑ / ↓  Move   Enter  Select   Type to filter   Ctrl+C  Quit")
+	items := func() ([]ui.MenuItem, error) {
+		rows, err := choices()
+		if err != nil {
+			return nil, err
+		}
+		static := make([]Choice, len(rows))
+		for i := range rows {
+			static[i] = rows[i].Choice
+		}
+		labels := menuLabels(static, p.console.Width()-selectorColumns)
+		menu := make([]ui.MenuItem, len(rows))
+		for i := range rows {
+			menu[i] = ui.MenuItem{ID: rows[i].Key, Label: labels[i]}
+		}
+		return menu, nil
+	}
+	selected, err := p.console.SelectLive(p.in, p.ask(question), items, initial, menuHeight, true)
+	p.console.Blank()
+	if errors.Is(err, io.EOF) {
+		return "", ErrInterrupted
+	}
+	return selected, err
+}
+
 // ask styles a question for the interactive menu. The menu adds its own
 // delimiter after the text; the line editor is handed the whole prompt and
 // needs one written in.

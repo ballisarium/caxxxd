@@ -68,6 +68,7 @@ type Options struct {
 	TranscriptConverter TranscriptConverter
 	ConfigStore         config.Store
 	RevealFile          func(string) error
+	OpenFile            func(string) error
 	Home                string
 	Console             *ui.Console
 	Prompter            Prompter
@@ -115,6 +116,10 @@ type App struct {
 	initialURL    string
 	capture       browser.Capture
 	captureConfig string
+	captureID     int
+	captureCursor string
+	queue         []queuedDownload
+	queueRunning  bool
 
 	current stage
 	pending []message
@@ -201,6 +206,13 @@ func withDefaults(options Options) Options {
 	if options.RevealFile == nil {
 		options.RevealFile = revealInFileBrowser
 	}
+	if options.OpenFile == nil {
+		options.OpenFile = func(path string) error {
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			return exec.CommandContext(ctx, "open", path).Run()
+		}
+	}
 	if options.Home == "" {
 		if home, err := os.UserHomeDir(); err == nil {
 			options.Home = home
@@ -241,7 +253,7 @@ func revealInFileBrowser(path string) error {
 // Run draws the session and walks the steps until the user leaves.
 func (a *App) Run(ctx context.Context) (runErr error) {
 	defer func() {
-		runErr = errors.Join(runErr, a.closeCapture())
+		runErr = errors.Join(runErr, a.closeCapture(), a.closeQueuedCaptures())
 	}()
 	a.console.SetStatus(ui.Status{
 		Version:     a.options.Version,

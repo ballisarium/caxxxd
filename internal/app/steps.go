@@ -37,6 +37,8 @@ const (
 	stageSources
 	stageBrowserPage
 	stageCapture
+	stageQueue
+	stageHistory
 )
 
 // stepTitles are the steps the status bar counts. Several stages share one
@@ -46,7 +48,7 @@ var stepTitles = []string{"Link", "Media", "Format", "Review", "Download"}
 // stepOf maps a stage onto its step number and title.
 func stepOf(current stage) (int, string) {
 	switch current {
-	case stageLink, stageSource, stageSources, stageBrowserPage, stageCapture:
+	case stageLink, stageSource, stageSources, stageBrowserPage, stageCapture, stageQueue, stageHistory:
 		return 1, stepTitles[0]
 	case stageRange, stageRangeStart, stageRangeEnd, stageRangeConfirm, stageMode:
 		return 2, stepTitles[1]
@@ -108,6 +110,10 @@ func (a *App) step(ctx context.Context, current stage) (stage, error) {
 		return a.askBrowserPage(ctx)
 	case stageCapture:
 		return a.askCapture(ctx)
+	case stageQueue:
+		return a.askQueue()
+	case stageHistory:
+		return a.askHistory()
 	case stageLink:
 		return a.askLink(ctx)
 	case stageRange:
@@ -159,7 +165,7 @@ func (a *App) askLink(ctx context.Context) (stage, error) {
 
 	typed, err := a.prompt.Text(
 		"Paste a media URL",
-		"One item per run. Playlists are not supported yet.",
+		"One media item per link. Playlists are not supported.",
 		prefill,
 	)
 	if err != nil {
@@ -275,7 +281,14 @@ func (a *App) askMode() (stage, error) {
 		backChoice,
 	}
 
-	picked, err := a.prompt.Choose("What do you want out of it?", choices, 0)
+	initial := 0
+	if a.mode == domain.MediaModeAudio {
+		initial = 1
+	}
+	if a.mode == domain.MediaModeSubtitles {
+		initial = 2
+	}
+	picked, err := a.prompt.Choose("What do you want out of it?", choices, initial)
 	if err != nil {
 		return stageMode, err
 	}
@@ -752,6 +765,8 @@ func (a *App) askReview() (stage, error) {
 		changeRange = len(choices)
 		choices = append(choices, Choice{Label: "Change time range", Detail: "choose a different part of the video"})
 	}
+	queueIndex := len(choices)
+	choices = append(choices, Choice{Label: "Add to queue", Detail: "save this selection for a later download"})
 	backIndex := len(choices)
 	choices = append(choices, backChoice)
 	quitIndex := len(choices)
@@ -773,6 +788,8 @@ func (a *App) askReview() (stage, error) {
 	case changeRange:
 		a.rangeReturn = stageReview
 		return stageRange, nil
+	case queueIndex:
+		return a.enqueueCurrent()
 	case backIndex:
 		return a.reviewReturn(), nil
 	case quitIndex:

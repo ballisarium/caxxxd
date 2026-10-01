@@ -25,6 +25,19 @@ func TestBuildBestVideoMKV(t *testing.T) {
 	assertContainsSequence(t, args, "-P", "/tmp/out")
 }
 
+func TestBuildDownloadResumesWithBoundedNetworkRetries(t *testing.T) {
+	args, err := ytdlp.BuildCommand(ytdlp.DownloadRequest{
+		URL: "https://example.test/video", Mode: domain.MediaModeVideo,
+		Container: domain.VideoContainerMKV, OutputDir: "/tmp/out",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertContainsSequence(t, args, "--continue", "--part")
+	assertContainsSequence(t, args, "--retries", "5", "--fragment-retries", "5")
+	assertContainsSequence(t, args, "--retry-sleep", "http:linear=1:5", "--retry-sleep", "fragment:linear=1:5")
+}
+
 func TestBuildMP3Audio(t *testing.T) {
 	args, err := ytdlp.BuildCommand(ytdlp.DownloadRequest{
 		URL:         "https://example.test/video",

@@ -26,6 +26,25 @@ const (
 
 // runDownload turns the selection into a real file, or into an explanation.
 func (a *App) runDownload(ctx context.Context) (stage, error) {
+	if a.capture != nil {
+		var prepareErr error
+		if interrupted(ctx, func(runCtx context.Context) {
+			selected, err := a.capture.Prepare(runCtx, a.captureID)
+			prepareErr = err
+			if err == nil {
+				a.url, a.captureConfig = selected.URL, selected.ConfigFile
+			}
+		}) {
+			a.queueRunning = false
+			return stageReview, nil
+		}
+		if prepareErr != nil {
+			a.queueRunning = false
+			return a.reportFailure(Failure{Category: FailureTool, NextStep: "Could not prepare this browser stream. Keep the browser open and select a fresh resource."},
+				recovery{"Recapture stream", "play or reload the page, then choose a fresh stream", stageCapture},
+				recovery{"Change something", "go back to the review", stageReview})
+		}
+	}
 	request := a.request()
 	var subtitleDirectory string
 	cleanupSubtitles := func() error {
@@ -95,6 +114,7 @@ func (a *App) runDownload(ctx context.Context) (stage, error) {
 
 	switch result {
 	case outcomeCancelled:
+		a.queueRunning = false
 		if a.mode == domain.MediaModeSubtitles {
 			body := []string{"No transcript was written."}
 			if cleanupErr := cleanupSubtitles(); cleanupErr != nil {
@@ -120,10 +140,14 @@ func (a *App) runDownload(ctx context.Context) (stage, error) {
 			return stageReview, ctx.Err()
 		}
 		a.failure = classifyDownloadError(runErr, a.logs)
-		return a.reportFailure(a.failure,
-			recovery{"Try again", "run the same download once more", stageDownload},
+		ways := []recovery{
+			recovery{"Try again", "resume the same download where supported", stageDownload},
 			recovery{"Change something", "go back to the review", stageReview},
-		)
+		}
+		if a.capture != nil {
+			ways = append(ways, recovery{"Recapture stream", "play or reload the page, then choose a fresh stream", stageCapture})
+		}
+		return a.reportFailure(a.failure, ways...)
 
 	default:
 		if a.mode == domain.MediaModeSubtitles {
@@ -184,6 +208,12 @@ func (a *App) runDownload(ctx context.Context) (stage, error) {
 			}, recovery{"Try again", "run the same download once more", stageDownload},
 				recovery{"Change something", "go back to the review", stageReview})
 		}
+		a.recordHistory()
+		if a.queueRunning && len(a.queue) > 0 {
+			a.carryHint("Completed: " + filepath.Base(a.completedPath))
+			return a.startNextQueued()
+		}
+		a.queueRunning = false
 		return a.reportSuccess()
 	}
 }
@@ -444,11 +474,17 @@ func (a *App) reportSuccess() (stage, error) {
 		a.screen(stageDownload)
 		a.console.Success("Download complete", a.console.Fields(fields)...)
 
-		picked, err := a.prompt.Choose("What now?", []Choice{
+		choices := []Choice{
 			{Label: "Download another", Detail: "start again from a new link"},
 			{Label: "Reveal in Finder", Detail: revealDetail(a.completedPath)},
-			quitChoice,
-		}, 0)
+		}
+		continueIndex := -1
+		if len(a.queue) > 0 {
+			continueIndex = len(choices)
+			choices = append(choices, Choice{Label: "Continue queue", Detail: fmt.Sprintf("%d waiting", len(a.queue))})
+		}
+		choices = append(choices, quitChoice)
+		picked, err := a.prompt.Choose("What now?", choices, 0)
 		if err != nil {
 			return stageLink, err
 		}
@@ -459,6 +495,8 @@ func (a *App) reportSuccess() (stage, error) {
 			return stageSource, nil
 		case 1:
 			a.reveal()
+		case continueIndex:
+			return a.startNextQueued()
 		default:
 			return stageLink, errQuit
 		}
@@ -498,6 +536,9 @@ type recovery struct {
 // output is kept behind a choice: it is the second question someone asks, not
 // the first.
 func (a *App) reportFailure(failure Failure, ways ...recovery) (stage, error) {
+	if a.current == stageDownload && len(a.queue) > 0 {
+		ways = append(ways, recovery{"Skip item and view queue", "keep the remaining selections", stageQueue})
+	}
 	failure.Detail = ytdlp.SafeDiagnostic(failure.Detail)
 	category := failure.Category
 	if category == FailureNone {
@@ -536,6 +577,9 @@ func (a *App) reportFailure(failure Failure, ways ...recovery) (stage, error) {
 
 		switch {
 		case picked < len(ways):
+			if ways[picked].next != stageDownload {
+				a.queueRunning = false
+			}
 			return ways[picked].next, nil
 		case picked == len(ways):
 			details = !details

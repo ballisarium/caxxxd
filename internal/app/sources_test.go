@@ -3,6 +3,7 @@ package app_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/ballisarium/caxxxd/internal/app"
@@ -103,5 +104,43 @@ func TestBackFromCapturedMediaReturnsToTheStreamList(t *testing.T) {
 	s.requireScripted()
 	if len(s.prompter.menusFor("Captured media")) != 2 || !capture.closed {
 		t.Fatal("Back must return to captured resources, then close the browser")
+	}
+}
+
+func TestCapturedVariantsExposeMetadataAndSelectTheirStableID(t *testing.T) {
+	capture := &fakeCapture{items: []browser.Candidate{
+		{ID: 9, Kind: "HLS", Group: "video:1", Height: 1080, Duration: 120, Codecs: "avc1,mp4a", Source: "player 1 · example.test"},
+		{ID: 4, Kind: "HLS", Group: "video:1", Height: 720, Duration: 120},
+	}}
+	s := newSession(t, script(pick("Web page"), text("https://example.test/player"), pick("Separate browser"),
+		pick("1 · HLS"), pick("2 · HLS"), pick("‹ Back"), pick("‹ Back"), pick("Quit")), func(o *app.Options) {
+		o.OpenBrowser = func(context.Context, string) (browser.Capture, error) { return capture, nil }
+	})
+	s.prompter.autoSource, s.prompter.autoWholeVideo = false, false
+	s.run()
+	s.requireScripted()
+	if capture.selected != 4 || len(s.prompter.menusFor("Streams for this video")) != 1 {
+		t.Fatal("related variants must expose their metadata and preserve the selected resource ID")
+	}
+	menus := s.prompter.menusFor("Captured media")
+	if len(menus) == 0 || !strings.Contains(menus[0][0], "2 streams") {
+		t.Fatalf("related streams were not grouped: %#v", menus)
+	}
+}
+
+func TestFailedCapturedDownloadOffersRecapture(t *testing.T) {
+	capture := &fakeCapture{}
+	downloader := newFakeDownloader(logEvent("ERROR: HTTP Error 403: Forbidden"), doneEvent(errors.New("download failed")))
+	s := newSession(t, script(pick("Web page"), text("https://example.test/player"), pick("Separate browser"),
+		pick("1 · HLS"), pick("Video"), pick("Best available"), pick("MKV"), pick("Download"),
+		pick("Recapture stream"), pick("‹ Back"), pick("Quit")), func(o *app.Options) {
+		o.OpenBrowser = func(context.Context, string) (browser.Capture, error) { return capture, nil }
+		o.Downloader = downloader
+	})
+	s.prompter.autoSource = false
+	s.run()
+	s.requireScripted()
+	if len(s.prompter.menusFor("Captured media")) != 2 || !capture.closed {
+		t.Fatal("failed capture must return to its stream picker and release the browser on exit")
 	}
 }
